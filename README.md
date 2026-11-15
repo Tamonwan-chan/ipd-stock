@@ -42,7 +42,9 @@
 ```
 docs/        เอกสารโจทย์ (PRD) และการออกแบบ (DESIGN)
 data/raw/    รายงานจาก IT (ไม่เก็บใน git ดู data/README.md)
-src/         โค้ด Apps Script (จะเพิ่มเมื่อเริ่มทำ)
+src/         โค้ด Apps Script (ตอนนี้มีส่วนคำนวณ Calc.js)
+test/        ชุดทดสอบส่วนคำนวณ (npm test)
+tools/       เครื่องมือทดสอบสูตรกับข้อมูลจริง (npm run backtest)
 ```
 
 repo นี้เป็นสาธารณะ เก็บเฉพาะโค้ดและเอกสาร ข้อมูลยาและการใช้ยาอยู่ใน Google Sheet เท่านั้น

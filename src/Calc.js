@@ -1,0 +1,304 @@
+/**
+ * Calc.js — pure calculation functions for the IPD stock tool.
+ *
+ * No Apps Script services are used here, so this file runs unchanged in
+ * Google Apps Script (as the global `Calc`) and in Node (via require) for tests.
+ * Dates are ISO strings 'YYYY-MM-DD' throughout; the Apps Script layer converts
+ * Sheet Date cells to ISO before calling in.
+ *
+ * Policy: periodic review, order-up-to (R, S). See docs/DESIGN.md §5.
+ */
+var Calc = (function () {
+  'use strict';
+
+  var EPS = 1e-9;
+
+  /** Settings defaults; the Settings sheet overrides any of these. */
+  var DEFAULTS = {
+    cycle_days: 7,          // days between deliveries
+    lead_days: 1,           // count day -> delivery day (Tue -> Wed)
+    delay_days: 0,          // extra days for late delivery
+    history_days: 90,       // usage history used for par
+    z: 1.65,                // safety factor, normal drugs
+    critical_z: 2.33,       // safety factor, critical drugs
+    min_use_freq: 1 / 7,    // below this share of days used: not stocked by default
+    expensive_value: 5000,  // THB of usage over the history window ...
+    expensive_max_freq: 0.5 // ... combined with use on fewer than this share of days
+  };
+
+  // ---------------------------------------------------------------- helpers
+
+  /** Round up, ignoring floating-point noise (6.0000000001 -> 6). `+ 0` turns -0 into 0. */
+  function ceilSafe(x) {
+    return Math.ceil(x - EPS) + 0;
+  }
+
+  /** True for null, undefined, '' and whitespace-only strings. */
+  function isBlank(v) {
+    return v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+  }
+
+  /** Number from a cell value, or null when blank / not a number. */
+  function toNumber(v) {
+    if (isBlank(v)) return null;
+    var n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, '').trim());
+    return isFinite(n) ? n : null;
+  }
+
+  /** Merge user settings over DEFAULTS, converting numeric strings. */
+  function settingsWithDefaults(s) {
+    var out = {};
+    for (var k in DEFAULTS) {
+      var v = s && toNumber(s[k]);
+      out[k] = v === null || v === undefined ? DEFAULTS[k] : v;
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------ dates
+
+  function isoFromUTC(ms) {
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+
+  function utcFromIso(iso) {
+    var p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!p) throw new Error('Bad ISO date: ' + iso);
+    return Date.UTC(+p[1], +p[2] - 1, +p[3]);
+  }
+
+  function addDays(iso, n) {
+    return isoFromUTC(utcFromIso(iso) + n * 864e5);
+  }
+
+  /** Inclusive day count from a to b ('2026-08-01'..'2026-08-03' -> 3). */
+  function daysInclusive(a, b) {
+    return Math.round((utcFromIso(b) - utcFromIso(a)) / 864e5) + 1;
+  }
+
+  /**
+   * HOSxP export date 'd/m/yyyy' -> ISO. Accepts Buddhist-era years (> 2400)
+   * by subtracting 543. Throws on anything else so bad imports fail loudly.
+   */
+  function parseHosxpDate(s) {
+    var p = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(String(s));
+    if (!p) throw new Error('Unrecognised HOSxP date: ' + s);
+    var d = +p[1], m = +p[2], y = +p[3];
+    if (y > 2400) y -= 543;
+    var ms = Date.UTC(y, m - 1, d);
+    var iso = isoFromUTC(ms);
+    if (+iso.slice(8, 10) !== d || +iso.slice(5, 7) !== m) throw new Error('Invalid date: ' + s);
+    return iso;
+  }
+
+  // ------------------------------------------------------- drug identity
+
+  /** Collapse whitespace so trivial spacing differences still match. */
+  function norm(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/\s+/g, ' ').trim();
+  }
+
+  /** Match key for a HOSxP drug: name + strength + unit. */
+  function drugKey(name, strength, unit) {
+    return norm(name) + ' | ' + norm(strength) + ' | ' + norm(unit);
+  }
+
+  /** HOSxP tags high-alert drugs with 'HAD' in the name. */
+  function isCriticalName(name) {
+    return /HAD/i.test(String(name));
+  }
+
+  /** Placeholder rows such as 'YA.........' with unit '.'. */
+  function isPlaceholder(name, unit) {
+    return /\.{5,}/.test(String(name)) || norm(unit) === '.';
+  }
+
+  // ------------------------------------------------------------ usage stats
+
+  /**
+   * Daily quantity series from [{date: ISO, qty}] rows, covering from..to
+   * inclusive. Missing days are 0; rows outside the range are ignored;
+   * several rows on one day are summed.
+   */
+  function dailySeries(rows, from, to) {
+    var n = daysInclusive(from, to);
+    var series = [];
+    for (var i = 0; i < n; i++) series.push(0);
+    var start = utcFromIso(from);
+    (rows || []).forEach(function (r) {
+      var q = toNumber(r.qty);
+      if (q === null) return;
+      var idx = Math.round((utcFromIso(r.date) - start) / 864e5);
+      if (idx >= 0 && idx < n) series[idx] += q;
+    });
+    return series;
+  }
+
+  /** Mean, population SD, share of days used, total and length of a series. */
+  function usageStats(series) {
+    var n = series.length;
+    if (n === 0) return { days: 0, total: 0, mean: 0, sd: 0, useFreq: 0 };
+    var total = 0, used = 0;
+    series.forEach(function (q) { total += q; if (q > 0) used++; });
+    var mean = total / n, ss = 0;
+    series.forEach(function (q) { ss += (q - mean) * (q - mean); });
+    return { days: n, total: total, mean: mean, sd: Math.sqrt(ss / n), useFreq: used / n };
+  }
+
+  /** Largest sum over any W consecutive days (whole series if shorter than W). */
+  function maxWindowSum(series, W) {
+    if (series.length <= W) return series.reduce(function (a, b) { return a + b; }, 0);
+    var s = 0, best;
+    for (var i = 0; i < W; i++) s += series[i];
+    best = s;
+    for (var j = W; j < series.length; j++) {
+      s += series[j] - series[j - W];
+      if (s > best) best = s;
+    }
+    return best;
+  }
+
+  // -------------------------------------------------------------------- par
+
+  /** Days from count to the next delivery, inclusive (default 7 + 1 + 1 + 0 = 9). */
+  function windowDays(settings) {
+    var s = settingsWithDefaults(settings);
+    return s.cycle_days + s.lead_days + 1 + s.delay_days;
+  }
+
+  /**
+   * Par level for one drug, in HOSxP units.
+   *   parCalc = ceil(mean·W + z·sd·√W); critical drugs also ≥ worst W-day demand.
+   *   par     = par_override if set, else max(parCalc, min_par).
+   *
+   * @param {number[]} series  daily usage over the history window
+   * @param {{critical?:boolean, min_par?:*, par_override?:*}} drug
+   * @param {Object} settings
+   * @return {{par:number, parCalc:number, source:string, W:number, mean:number, sd:number, useFreq:number}}
+   *   source: 'override' | 'min_par' | 'calc' | 'none'
+   */
+  function calcPar(series, drug, settings) {
+    var s = settingsWithDefaults(settings);
+    var W = windowDays(s);
+    var st = usageStats(series);
+    var critical = !!(drug && drug.critical);
+    var z = critical ? s.critical_z : s.z;
+
+    var parCalc = st.mean > 0 ? ceilSafe(st.mean * W + z * st.sd * Math.sqrt(W)) : 0;
+    if (critical) parCalc = Math.max(parCalc, maxWindowSum(series, W));
+
+    var override = toNumber(drug && drug.par_override);
+    var minPar = toNumber(drug && drug.min_par) || 0;
+    var par, source;
+    if (override !== null) { par = override; source = 'override'; }
+    else if (minPar > parCalc) { par = minPar; source = 'min_par'; }
+    else { par = parCalc; source = parCalc > 0 ? 'calc' : 'none'; }
+
+    return { par: par, parCalc: parCalc, source: source, W: W, mean: st.mean, sd: st.sd, useFreq: st.useFreq };
+  }
+
+  /**
+   * Suggested stock-list membership and review tier for one drug.
+   * @return {{stocked:boolean, critical:boolean, tier:string}}
+   *   tier: 'placeholder' | 'critical' | 'expensive' | 'regular' | 'rare'
+   */
+  function classifyDrug(d, stats, settings) {
+    var s = settingsWithDefaults(settings);
+    if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder' };
+    var critical = isCriticalName(d.name);
+    if (critical) return { stocked: true, critical: true, tier: 'critical' };
+    var value = (stats.total || 0) * (toNumber(d.unit_price) || 0);
+    if (value >= s.expensive_value && stats.useFreq < s.expensive_max_freq) {
+      return { stocked: false, critical: false, tier: 'expensive' };
+    }
+    if (stats.useFreq >= s.min_use_freq - EPS) return { stocked: true, critical: false, tier: 'regular' };
+    return { stocked: false, critical: false, tier: 'rare' };
+  }
+
+  // ------------------------------------------------------------------ order
+
+  /**
+   * Quantity to request, in request units (whole units, rounded up).
+   * @param {number} par            in HOSxP units
+   * @param {*} countedRequestUnits on hand, in request units (may be decimal); blank = not counted
+   * @param {*} requestFactor       HOSxP units per request unit (blank = 1)
+   * @return {{counted:boolean, onHand:number|null, shortfall:number|null, qty:number|null}}
+   */
+  function suggestOrder(par, countedRequestUnits, requestFactor) {
+    var f = toNumber(requestFactor) || 1;
+    var c = toNumber(countedRequestUnits);
+    if (c === null) return { counted: false, onHand: null, shortfall: null, qty: null };
+    var onHand = c * f;
+    var shortfall = Math.max(0, par - onHand);
+    return { counted: true, onHand: onHand, shortfall: shortfall, qty: ceilSafe(shortfall / f) };
+  }
+
+  /**
+   * Review flags for one round line.
+   * @param {{critical?:boolean, stocked?:boolean}} drug
+   * @param {{par:number, source:string, mean:number}} parInfo
+   * @param {{counted:boolean, onHand:number|null, qty:number|null}} order
+   * @param {*} finalQty  pharmacist's quantity (blank = unchanged)
+   * @param {*} requestFactor
+   * @param {Object} settings
+   * @return {string[]}
+   */
+  function lineFlags(drug, parInfo, order, finalQty, requestFactor, settings) {
+    var s = settingsWithDefaults(settings);
+    var f = toNumber(requestFactor) || 1;
+    var flags = [];
+    if (!order.counted) flags.push('NOT_COUNTED');
+    if (drug.critical && order.counted && order.onHand < parInfo.par) flags.push('CRITICAL_LOW');
+    var weekly = parInfo.mean * s.cycle_days;
+    if (order.counted && weekly > 0 && order.qty * f > 2 * weekly) flags.push('BIG_ORDER');
+    if (parInfo.source !== 'calc') flags.push('NO_USAGE_DATA');
+    var fq = toNumber(finalQty);
+    if (fq !== null && fq !== order.qty) flags.push('EDITED');
+    return flags;
+  }
+
+  // ----------------------------------------------------------------- output
+
+  /** One requisition line for OPD. */
+  function requestLine(drug, qty) {
+    return {
+      name: norm(drug.request_name) || norm(drug.hosxp_name),
+      qty: qty,
+      unit: norm(drug.request_unit) || norm(drug.unit),
+      remark: 'IPD'
+    };
+  }
+
+  /** Numbered tab-separated text of lines with qty > 0, for pasting into OPD's form. */
+  function toTsv(lines) {
+    return lines
+      .filter(function (l) { return l.qty > 0; })
+      .map(function (l, i) { return [i + 1, l.name, l.qty, l.unit, l.remark].join('\t'); })
+      .join('\n');
+  }
+
+  return {
+    DEFAULTS: DEFAULTS,
+    settingsWithDefaults: settingsWithDefaults,
+    toNumber: toNumber,
+    isBlank: isBlank,
+    addDays: addDays,
+    daysInclusive: daysInclusive,
+    parseHosxpDate: parseHosxpDate,
+    drugKey: drugKey,
+    isCriticalName: isCriticalName,
+    isPlaceholder: isPlaceholder,
+    dailySeries: dailySeries,
+    usageStats: usageStats,
+    maxWindowSum: maxWindowSum,
+    windowDays: windowDays,
+    calcPar: calcPar,
+    classifyDrug: classifyDrug,
+    suggestOrder: suggestOrder,
+    lineFlags: lineFlags,
+    requestLine: requestLine,
+    toTsv: toTsv
+  };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Calc;

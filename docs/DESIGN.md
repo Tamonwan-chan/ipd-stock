@@ -68,6 +68,8 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | `z` | 1.65 | safety factor, normal drugs (nominal 95%; ~93% achieved on real data) |
 | `critical_z` | 2.33 | safety factor, `critical` drugs (nominal 99%) |
 | `min_use_freq` | 0.143 | drugs used on fewer than this share of days (≈ less than weekly) are not stocked by default |
+| `expensive_value` | 5000 | THB of usage over the history window that, together with … |
+| `expensive_max_freq` | 0.5 | … use on fewer than this share of days, puts a drug in the pharmacist-set tier (§5.2) |
 
 Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 9 by default: Tuesday count through next Wednesday's delivery, inclusive).
 
@@ -82,6 +84,7 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 9 by default: Tue
 | `request_unit` | ขวด | optional, unit to count and request in when it differs from `unit`; blank = `unit` |
 | `request_factor` | 240 | `unit`s per `request_unit` (KCl syrup: 240 ml per bottle); blank = 1 |
 | `request_name` | Vitamin B complex | optional, name to print for OPD; blank = `hosxp_name` |
+| `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
 | `stocked` | TRUE | FALSE = keep for matching, never count or order |
 | `critical` | TRUE | HAD / emergency-box items |
 | `min_par` | 10 | floor for par (e.g. emergency-box quantity) |
@@ -170,7 +173,17 @@ The 11 HAD injectables named by IPD staff all appear in HOSxP with an `HAD` tag 
 
 ### 5.3 Delivery delay
 
-Staff asked for 3–5 extra days in case of late delivery (Q5). The safety stock covers *demand* variation, not a *late delivery*. Adding `delay_days = 3` widens the window to 12 days and raises stock roughly by a third. Decide with IPD whether late deliveries happen often enough to pay for that, or whether `delay_days` applies to `critical` drugs only.
+Staff asked for 3–5 extra days in case of late delivery (Q5). The safety stock covers *demand* variation, not a *late delivery*. Backtest with `src/Calc.js` (`npm run backtest`, train Aug–Sep, test Oct, 197 stocked drugs, deliveries on time):
+
+| `delay_days` | Drug-cycles short | Peak stock | Avg on-hand |
+| -: | -: | -: | -: |
+| 0 | 7.2% | 107k THB | 74k THB |
+| 3 | 4.6% | 135k THB | 102k THB |
+| 5 | 3.5% | 154k THB | 121k THB |
+
+Extra days also cut shortfalls when deliveries are on time, because they add stock. Each day costs roughly 9–10k THB of extra stock. Decide with IPD whether late deliveries happen often enough to pay for that, or whether `delay_days` applies to `critical` drugs only.
+
+These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (§5.2) are left out of the formula.
 
 ### 5.4 First rounds and later improvements
 
@@ -218,6 +231,7 @@ src/                 Apps Script project root (clasp rootDir)
   Code.js  Calc.js  Db.js  Import.js  Rounds.js
   ui/ Count.html  Review.html  Output.html  Styles.html
 test/calc.test.js    node --test, covers Calc.js only
+tools/backtest.js    replays a HOSxP export through Calc.js (aggregates only)
 docs/                PRD, DESIGN
 ```
 

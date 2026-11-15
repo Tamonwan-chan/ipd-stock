@@ -1,0 +1,14 @@
+{
+  "name": "ipd-stock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drug stock and weekly requisition tool for a hospital inpatient (IPD) pharmacy (Google Apps Script + Google Sheets)",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test test/",
+    "backtest": "node tools/backtest.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
