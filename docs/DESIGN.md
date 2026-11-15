@@ -25,7 +25,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | OPD orders Tuesday, stock arrives Wednesday ~14:00 (Q1) | Demand window = count day through next delivery = 9 days (§5) |
 | 11 HAD injectables must never run out (Q4) | Per-drug `critical` flag → par from the worst observed window + minimum par |
 | OPD accepts quantities in units and will add IPD lines to its own requisition (OPD, 15 Nov) | No box rounding; output is a plain list in units (whole bottles for liquids dispensed per ml) |
-| HOSxP export is daily, one row per drug per day, no patient columns | Store daily usage in the Sheet; percentiles need daily data |
+| HOSxP export is daily, one row per drug per day, no patient columns | Store daily usage in the Sheet; the daily SD and the worst W-day window need daily data |
 | Repo is public | No spreadsheet IDs, script IDs or hospital data in git |
 
 ## 3. Architecture
@@ -37,7 +37,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
                                  │ SpreadsheetApp (bound script)
 ┌────────────────────────────────┴─────────────────────────────────────────────┐
 │ Apps Script project (this repo, deployed with clasp)                         │
-│  Calc.js   pure functions: rolling windows, percentile, par, order (Node-tested)
+│  Calc.js   pure functions: mean/SD, worst window, par, order (Node-tested)
 │  Db.js     read/write sheets as arrays of objects, LockService               │
 │  Import.js HOSxP CSV → UsageDaily, new drugs → Drugs, recompute par         │
 │  Rounds.js round lifecycle                                                   │
