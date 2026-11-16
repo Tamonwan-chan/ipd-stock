@@ -1,4 +1,4 @@
-// Unit tests for src/Calc.js. Run: npm test  (or: node --test test/)
+// Unit tests for src/Calc.js. Run: npm test
 // Synthetic numbers only — no hospital data in this public repo.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +10,7 @@ test('settingsWithDefaults: fills gaps, parses numeric strings, keeps zeros', ()
   const s = Calc.settingsWithDefaults({ z: '2', delay_days: 0, cycle_days: '' });
   assert.equal(s.z, 2);
   assert.equal(s.delay_days, 0);
-  assert.equal(s.cycle_days, 7);
+  assert.equal(s.cycle_days, 14);
   assert.equal(Calc.settingsWithDefaults().critical_z, 2.33);
 });
 
@@ -63,15 +63,16 @@ test('maxWindowSum', () => {
   assert.equal(Calc.maxWindowSum([1, 2], 9), 3);
 });
 
-test('windowDays: 7 + 1 + 1 + delay', () => {
-  assert.equal(Calc.windowDays({}), 9);
-  assert.equal(Calc.windowDays({ delay_days: 3 }), 12);
+test('windowDays: 14 + 1 + 1 + delay', () => {
+  assert.equal(Calc.windowDays({}), 16);
+  assert.equal(Calc.windowDays({ delay_days: 3 }), 19);
+  assert.equal(Calc.windowDays({ cycle_days: 7 }), 9);
 });
 
 test('calcPar: steady demand has no safety stock', () => {
   const r = Calc.calcPar(Array(90).fill(2), {}, {});
-  assert.equal(r.parCalc, 18); // 2/day × 9 days, sd 0
-  assert.equal(r.par, 18);
+  assert.equal(r.parCalc, 32); // 2/day × 16 days, sd 0
+  assert.equal(r.par, 32);
   assert.equal(r.source, 'calc');
 });
 
@@ -84,7 +85,7 @@ test('calcPar: floating-point noise does not add a unit', () => {
 test('calcPar: safety stock = z·σ·√W', () => {
   const series = [0, 4, 0, 4, 0, 4, 0, 4]; // mean 2, sd 2
   const r = Calc.calcPar(series, {}, { z: 1.65 });
-  assert.equal(r.parCalc, Math.ceil(2 * 9 + 1.65 * 2 * 3)); // 18 + 9.9 → 28
+  assert.equal(r.parCalc, Math.ceil(2 * 16 + 1.65 * 2 * 4)); // 32 + 13.2 → 46
 });
 
 test('calcPar: critical drugs use critical_z and at least the worst window', () => {
@@ -97,7 +98,7 @@ test('calcPar: critical drugs use critical_z and at least the worst window', () 
 });
 
 test('calcPar: override wins (including 0), min_par floors, blanks ignored', () => {
-  const series = Array(90).fill(1); // parCalc 9
+  const series = Array(90).fill(1); // parCalc 16
   assert.deepEqual(
     [Calc.calcPar(series, { par_override: 0 }, {}).par, Calc.calcPar(series, { par_override: 0 }, {}).source],
     [0, 'override']);
@@ -105,7 +106,7 @@ test('calcPar: override wins (including 0), min_par floors, blanks ignored', () 
   const floored = Calc.calcPar(series, { min_par: 20 }, {});
   assert.deepEqual([floored.par, floored.source], [20, 'min_par']);
   const blank = Calc.calcPar(series, { min_par: '', par_override: '' }, {});
-  assert.deepEqual([blank.par, blank.source], [9, 'calc']);
+  assert.deepEqual([blank.par, blank.source], [16, 'calc']);
 });
 
 test('calcPar: no usage gives par 0 with source none', () => {
@@ -132,7 +133,7 @@ test('suggestOrder: blank count is "not counted", 0 is a real count', () => {
 });
 
 test('lineFlags', () => {
-  const parInfo = { par: 18, source: 'calc', mean: 2 }; // weekly use 14
+  const parInfo = { par: 18, source: 'calc', mean: 2 }; // use per cycle 28
   const f = (drug, count, finalQty) =>
     Calc.lineFlags(drug, parInfo, Calc.suggestOrder(parInfo.par, count, 1), finalQty, 1, {});
   assert.deepEqual(f({}, '', ''), ['NOT_COUNTED']);
@@ -140,26 +141,63 @@ test('lineFlags', () => {
   assert.deepEqual(f({}, 10, ''), []);
   assert.deepEqual(f({}, 10, 5), ['EDITED']);
   assert.deepEqual(f({}, 10, 8), []); // same as suggested → not edited
-  // par override far above usual use → order of 40 > 2 × 14
-  const big = Calc.lineFlags({}, { par: 40, source: 'override', mean: 2 }, Calc.suggestOrder(40, 0, 1), '', 1, {});
+  // par override far above usual use → order of 60 > 2 × 28
+  const big = Calc.lineFlags({}, { par: 60, source: 'override', mean: 2 }, Calc.suggestOrder(60, 0, 1), '', 1, {});
   assert.deepEqual(big, ['BIG_ORDER', 'NO_USAGE_DATA']);
 });
 
+test('supplySource: 1-pack rule per cycle', () => {
+  // 100 per box, 14-day cycle: needs ≥ 100/14 ≈ 7.15 per day for main storage
+  assert.equal(Calc.supplySource(8, 100, {}), 'MAIN');
+  assert.equal(Calc.supplySource(100 / 14, 100, {}), 'MAIN'); // exactly 1 pack
+  assert.equal(Calc.supplySource(7, 100, {}), 'OPD');
+  assert.equal(Calc.supplySource(7, 100, { cycle_days: 15 }), 'MAIN');
+  assert.equal(Calc.supplySource(0, 1, {}), 'OPD');
+  assert.equal(Calc.supplySource(5, '', {}), 'UNKNOWN');
+  assert.equal(Calc.supplySource(5, 0, {}), 'UNKNOWN');
+});
+
 test('classifyDrug', () => {
-  const st = (useFreq, total = 100) => ({ useFreq, total });
-  assert.equal(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)).tier, 'placeholder');
-  assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**' }, st(0.01)), { stocked: true, critical: true, tier: 'critical' });
+  const st = (useFreq, total = 100, mean = 1) => ({ useFreq, total, mean });
+  assert.deepEqual(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)),
+    { stocked: false, critical: false, tier: 'placeholder', source: null });
+  assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**', pack_size: 100 }, st(0.01)),
+    { stocked: true, critical: true, tier: 'critical', source: 'MAIN' });
   assert.equal(Calc.classifyDrug({ name: 'Costly inj', unit_price: 1000 }, st(0.2, 10)).tier, 'expensive');
+  assert.equal(Calc.classifyDrug({ name: 'Costly inj', unit_price: 1000, pack_size: 1 }, st(0.2, 10)).source, 'MAIN');
   assert.equal(Calc.classifyDrug({ name: 'Costly but daily', unit_price: 1000 }, st(0.9, 10)).tier, 'regular');
-  assert.equal(Calc.classifyDrug({ name: 'Weekly', unit_price: 1 }, st(1 / 7)).tier, 'regular');
+  // pack size known: the 1-pack rule decides, regardless of use frequency
+  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 100', pack_size: 100 }, st(1, 900, 10)),
+    { stocked: true, critical: false, tier: 'regular', source: 'MAIN' });
+  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 1000', pack_size: 1000 }, st(1, 900, 10)),
+    { stocked: false, critical: false, tier: 'opd', source: 'OPD' });
+  // pack size unknown: use frequency fallback
+  assert.deepEqual(Calc.classifyDrug({ name: 'Weekly', unit_price: 1 }, st(1 / 7)),
+    { stocked: true, critical: false, tier: 'regular', source: 'UNKNOWN' });
   assert.equal(Calc.classifyDrug({ name: 'Rare', unit_price: 1 }, st(0.05)).tier, 'rare');
 });
 
-test('requestLine and toTsv', () => {
+test('opdSuggestion: one cycle of use, at least 1 when used', () => {
+  assert.equal(Calc.opdSuggestion(0.5, 1, {}), 7);
+  assert.equal(Calc.opdSuggestion(0.01, 1, {}), 1);
+  assert.equal(Calc.opdSuggestion(0, 1, {}), 0);
+  assert.equal(Calc.opdSuggestion(30, 240, {}), 2); // 420 ml → 2 bottles of 240 ml
+});
+
+test('mainFormLine and mainFormTsv: form column order, units', () => {
+  const vit = { hosxp_name: '(NED)VIT B complex tab(-)', unit: 'เม็ด', request_name: 'Vitamin B complex' };
+  const kcl = { hosxp_name: 'KCl syr. (คิดต่อ ml.) (C)', unit: '1 ml.', request_unit: 'ขวด', item_code: 'A12' };
+  const lines = [Calc.mainFormLine(vit, 120, 1500), Calc.mainFormLine(kcl, 0.5, 0), Calc.mainFormLine(kcl, '', 3)];
+  assert.deepEqual(lines[0], { item_code: '', name: 'Vitamin B complex', unit: 'เม็ด', on_hand: 120, qty: 1500 });
+  assert.equal(Calc.mainFormTsv(lines),
+    '1\t\tVitamin B complex\tเม็ด\t120\t1500\n2\tA12\tKCl syr. (คิดต่อ ml.) (C)\tขวด\t\t3');
+});
+
+test('opdLine and opdTsv', () => {
   const kcl = { hosxp_name: 'KCl syr. (คิดต่อ ml.) (C)', unit: '1 ml.', request_unit: 'ขวด', request_name: '' };
   const vit = { hosxp_name: '(NED)VIT B complex tab(-)', unit: 'เม็ด', request_name: 'Vitamin B complex' };
-  const lines = [Calc.requestLine(kcl, 3), Calc.requestLine({ hosxp_name: 'X', unit: 'เม็ด' }, 0), Calc.requestLine(vit, 1500)];
+  const lines = [Calc.opdLine(kcl, 3), Calc.opdLine({ hosxp_name: 'X', unit: 'เม็ด' }, 0), Calc.opdLine(vit, 1500)];
   assert.deepEqual(lines[0], { name: 'KCl syr. (คิดต่อ ml.) (C)', qty: 3, unit: 'ขวด', remark: 'IPD' });
-  assert.equal(Calc.toTsv(lines),
+  assert.equal(Calc.opdTsv(lines),
     '1\tKCl syr. (คิดต่อ ml.) (C)\t3\tขวด\tIPD\n2\tVitamin B complex\t1500\tเม็ด\tIPD');
 });
