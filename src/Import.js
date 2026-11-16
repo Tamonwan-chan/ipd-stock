@@ -212,12 +212,14 @@ var Import = (function () {
         pack_size: d.pack_size, critical: d.critical }, st, s);
       var dec = C.stockDecision(d, cls);
       var par = C.calcPar(series, { critical: cls.critical }, s);
+      var min = C.calcMin(series, { critical: cls.critical }, s);
 
       d.use_freq = Math.round(st.useFreq * 1000) / 1000;
       d.mean_daily = Math.round(st.mean * 1000) / 1000;
       d.source_calc = cls.source || '';
       d.stocked = dec.stocked;
       d.par_calc = par.parCalc;
+      d.min_calc = min.minCalc;
       d.par_updated = today;
 
       if (dec.stocked) report.stocked++;
@@ -231,7 +233,7 @@ var Import = (function () {
       }
     });
 
-    D.updateFields('Drugs', drugs, ['use_freq', 'mean_daily', 'source_calc', 'stocked', 'par_calc', 'par_updated'], ss);
+    D.updateFields('Drugs', drugs, ['use_freq', 'mean_daily', 'source_calc', 'stocked', 'par_calc', 'min_calc', 'par_updated'], ss);
     // Remember the window for the web page (Settings rows outside Calc.DEFAULTS are ignored by Calc).
     D.upsert('Settings', [
       { key: 'usage_from', value: from, note: 'ช่วงข้อมูลที่ใช้คำนวณล่าสุด (เขียนโดยโปรแกรม)' },

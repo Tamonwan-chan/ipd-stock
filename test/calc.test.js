@@ -146,6 +146,43 @@ test('lineFlags', () => {
   assert.deepEqual(big, ['BIG_ORDER', 'NO_USAGE_DATA']);
 });
 
+test('minDays: lead + 1 + delay', () => {
+  assert.equal(Calc.minDays({}), 2);
+  assert.equal(Calc.minDays({ lead_days: 2, delay_days: 1 }), 4);
+});
+
+test('calcMin: mean·T + z·σ·√T; critical uses critical_z and the worst T days', () => {
+  assert.deepEqual(Calc.calcMin(Array(90).fill(2), {}, {}), { minCalc: 4, T: 2 }); // steady: 2/day × 2 days
+  const series = [0, 4, 0, 4, 0, 4, 0, 4]; // mean 2, sd 2
+  assert.equal(Calc.calcMin(series, {}, {}).minCalc, Math.ceil(2 * 2 + 1.65 * 2 * Math.SQRT2)); // 4 + 4.67 → 9
+  const burst = Array(90).fill(0);
+  burst[10] = 20;
+  burst[11] = 10;
+  assert.ok(Calc.calcMin(burst, {}, {}).minCalc < 30);
+  assert.ok(Calc.calcMin(burst, { critical: true }, {}).minCalc >= 30); // never below the worst 2 days
+  assert.equal(Calc.calcMin(Array(90).fill(0), {}, {}).minCalc, 0);
+});
+
+test('minFromStored: override wins (including 0), never above par', () => {
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, par_calc: 40 }), { min: 6, source: 'calc' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, min_override: '10', par_calc: 40 }), { min: 10, source: 'override' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, min_override: 0, par_calc: 40 }), { min: 0, source: 'override' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: '', par_calc: 40 }), { min: 0, source: 'none' });
+  assert.equal(Calc.minFromStored({ min_calc: 6, par_override: 4 }).min, 4); // capped at par
+});
+
+test('lineFlags: BELOW_MIN when the count is under min (HOSxP units)', () => {
+  const parInfo = { par: 40, source: 'calc', mean: 2, min: 6 };
+  const f = (count, factor) =>
+    Calc.lineFlags({}, parInfo, Calc.suggestOrder(parInfo.par, count, factor), '', factor, { cycle_days: 30 });
+  assert.deepEqual(f(5, 1), ['BELOW_MIN']);
+  assert.deepEqual(f(6, 1), []);
+  assert.deepEqual(f(0.5, 10), ['BELOW_MIN']); // half a 10-unit bottle = 5 units
+  assert.deepEqual(f('', 1), ['NOT_COUNTED']);
+  const noMin = Calc.lineFlags({}, { par: 40, source: 'calc', mean: 2 }, Calc.suggestOrder(40, 0, 1), '', 1, { cycle_days: 30 });
+  assert.deepEqual(noMin, []);
+});
+
 test('supplySource: busiest cycle vs 80% of a pack', () => {
   assert.equal(Calc.supplySource(91, 100, {}), 'MAIN'); // 91 of a box of 100
   assert.equal(Calc.supplySource(80, 100, {}), 'MAIN'); // exactly 80%

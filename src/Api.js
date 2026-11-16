@@ -59,6 +59,7 @@ var Api = (function () {
 
     var out = drugs.filter(function (d) { return d.drug_id; }).map(function (d) {
       var p = C.parFromStored(d);
+      var mn = C.minFromStored(d);
       var factor = C.toNumber(d.request_factor) || 1;
       var manual = String(d.source || '').trim().toUpperCase();
       var source = manual === 'MAIN' || manual === 'OPD' ? manual : (d.source_calc || '');
@@ -80,6 +81,8 @@ var Api = (function () {
         pack_size: C.toNumber(d.pack_size),
         par: p.par,
         par_source: p.source,
+        min: mn.min,
+        min_source: mn.source,
         mean_daily: mean,
         use_freq: C.toNumber(d.use_freq) || 0,
         opd_suggestion: C.opdSuggestion(mean, factor, s)
@@ -90,7 +93,7 @@ var Api = (function () {
       user: userEmail_(),
       today: today_(),
       settings: { cycle_days: s.cycle_days, lead_days: s.lead_days, delay_days: s.delay_days, z: s.z,
-        window_days: C.windowDays(s), main_pack_share: s.main_pack_share },
+        window_days: C.windowDays(s), min_days: C.minDays(s), main_pack_share: s.main_pack_share },
       usage: { from: D.fromCell(raw.usage_from, 'date'), to: D.fromCell(raw.usage_to, 'date') },
       drugs: out,
       round: round ? roundInfo_(round) : null,
@@ -155,7 +158,8 @@ var Api = (function () {
       var factor = C.toNumber(d.request_factor) || 1;
       var order = C.suggestOrder(p.par, e.on_hand, factor);
       var finalQty = C.toNumber(e.final_qty);
-      var flags = C.lineFlags({ critical: !!d.critical }, { par: p.par, source: p.source, mean: C.toNumber(d.mean_daily) || 0 },
+      var flags = C.lineFlags({ critical: !!d.critical },
+        { par: p.par, source: p.source, mean: C.toNumber(d.mean_daily) || 0, min: C.minFromStored(d).min },
         order, finalQty === null ? '' : finalQty, factor, s);
       var line = {
         round_id: roundId, drug_id: e.drug_id,

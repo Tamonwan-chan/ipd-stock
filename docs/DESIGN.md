@@ -48,7 +48,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 │  Code.js   onOpen menu (admin) + doGet web app                               │
 │  ui/       App.html (page), Styles.html, Client.html (browser JS)            │
 └────────────┬───────────────────────────┬─────────────────────────────────────┘
-     Sheet menu (admin)           Web app (HtmlService), one page, four tabs
+     Sheet menu (admin)           Web app (HtmlService), one page, five tabs
      - import usage (paste)       - 1 import: drag a HOSxP file (.xlsx/.xls/.csv)
      - recompute par              - 2 count: on-hand → suggested qty, autosave
      - create tabs                - 3 main-storage form: print / CSV / copy
@@ -103,13 +103,15 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
 | `stocked` | TRUE | counted and ordered from main storage. Written by recompute from `source`, the rule and `critical` (§6); change `source` rather than this column |
 | `critical` | TRUE | HAD / emergency-box items. Ticked on import when the name has the `HAD` tag; the pharmacist may change it |
-| `min_par` | 10 | floor for par (e.g. emergency-box quantity) |
+| `min_par` | 10 | floor for par (e.g. emergency-box quantity). Not the same as the shelf min below |
 | `par_override` | | pharmacist's manual par; wins when set |
+| `min_override` | | pharmacist's manual shelf min (ยอดต่ำสุด); wins when set, 0 turns the warning off |
 | `location` | ตู้เก็บยา | ตู้เก็บยา / ชั้นวางยา / ลิ้นชักยา |
 | `shelf_order` | 120 | walking order for counting |
 | `use_freq` | 0.95 | share of days used in history (written by recompute) |
 | `source_calc` | OPD | 1-pack rule result, `UNKNOWN` while `pack_size` is blank (written by recompute) |
 | `par_calc` | 36 | written by recompute |
+| `min_calc` | 8 | shelf min, in `unit`s, written by recompute (§5) |
 | `par_updated` | 2026-11-20 | written by recompute |
 
 Match key on import: `hosxp_name + strength + unit`.
@@ -142,9 +144,16 @@ on_hand        = counted_request_units × request_factor            (decimals al
 suggested_qty  = ceil( max(0, par − on_hand) / request_factor )    in request units
 main form line = ลำดับ | item_code | request_name | request_unit | on_hand | final_qty
 OPD suggestion = ceil( d̄·cycle_days / request_factor ), at least 1 if used      (staff choose whether to request)
+
+T              = lead_days + 1 + delay_days                        (default 2 days: count → this round's delivery)
+min_calc       = ceil( d̄·T + z·σ·√T )                             critical drugs also: min ≥ largest T-day demand seen
+min            = min_override  if set,  else min_calc;  never above par
+BELOW_MIN      = counted on_hand < min
 ```
 
 `d̄·W` is the expected use until the next delivery; `z·σ·√W` is the safety stock. The safety stock grows with how irregular the drug's use is, not with a fixed number of buffer days.
+
+**Shelf min (ยอดต่ำสุด).** Par (max) is what each round tops up to. The min answers a different question: is there enough on the shelf to last until this round's delivery arrives? Below it, the drug will probably run out before main storage delivers, so staff fetch a top-up from OPD the same day. It uses the same formula as par with the shorter window `T`. The count page shows it next to max and flags lines under it; a printable list (tab 5) puts both numbers on the shelf, so anyone who notices a low bin between counts can check it without the app. On the Aug–Oct 2026 data the min is typically about a quarter of the max (median 0.23).
 
 ### 5.1 Evidence
 
@@ -243,6 +252,7 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 | flag | condition |
 | :- | :- |
 | `NOT_COUNTED` | stocked drug left blank (blank ≠ 0) |
+| `BELOW_MIN` | on_hand < min: fetch from OPD today, it won't last until the delivery |
 | `CRITICAL_LOW` | critical drug and on_hand < par |
 | `BIG_ORDER` | suggested_qty > 2 × usual use per cycle (on_hand much lower than expected: miscount, or usage jumped) |
 | `NO_USAGE_DATA` | par came only from `min_par`/override, or par is 0 |
@@ -257,7 +267,7 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
    - Rejects a column that Sheets converted only partly (some cells dates, others text with a day over 12): the sign of a month/day locale reading 5/11 as 11 May. The fix is to format column A as plain text and paste again.
    - Sums same-day rows, drops zero quantities, matches **Drugs** by `hosxp_name + strength + unit`, and creates new drugs with `critical` ticked when the name has the `HAD` tag. Updates `unit_price` to the latest price.
    - Replaces **UsageDaily** rows within the imported date range, clears **Import** (header kept), and runs step 3.
-3. Menu **IPD › คำนวณยอดที่ควรมีใหม่** (`Import.recompute`): uses the last `history_days` of **UsageDaily** up to the latest usage date (not before the first one), and writes `use_freq`, `source_calc`, `stocked`, `par_calc`, `par_updated`. The summary lists drugs with no `pack_size`, expensive drugs needing a `min_par`, and drugs whose `source` differs from the rule.
+3. Menu **IPD › คำนวณยอดที่ควรมีใหม่** (`Import.recompute`): uses the last `history_days` of **UsageDaily** up to the latest usage date (not before the first one), and writes `use_freq`, `mean_daily`, `source_calc`, `stocked`, `par_calc`, `min_calc`, `par_updated`. The summary lists drugs with no `pack_size`, expensive drugs needing a `min_par`, and drugs whose `source` differs from the rule.
 4. Pharmacist reviews `pack_size`, `source`, `critical`, `min_par`, `par_override` and `location` in **Drugs**, then reruns step 3. Placeholder rows such as `YA....` (unit `.`) stay unstocked.
 
 **`stocked` is written by recompute** (`Calc.stockDecision`); the pharmacist steers it through `source`:
@@ -267,12 +277,13 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 
 ### Web app (v1, 16 Nov 2026)
 
-One page (`ui/App.html`) with four tabs:
+One page (`ui/App.html`) with five tabs:
 
 1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
-2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location; typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
+2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
 3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
 4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = one cycle of average use; tick lines, print or copy. Ticks are remembered in the browser only.
+5. **ป้ายสูงสุด/ต่ำสุด**: printable A4 list of every stocked drug by location with max and min in request units (rounded up), plus CSV. Reprint after each import, since both numbers change.
 
 The round review step (status `REVIEW`) is folded into the same screen for now: the pharmacist edits `เบิกจริง` and approves.
 

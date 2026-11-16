@@ -133,6 +133,8 @@
   }
   .drow.head { background: none; border: 0; padding: 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; }
   .drow.has-order { border-left: 3px solid var(--accent); }
+  .drow.below-min { border-left: 3px solid var(--danger); background: var(--danger-soft); }
+  .drow .mm b { font-weight: 600; }
   .drow .name { font-weight: 600; overflow-wrap: anywhere; }
   .drow .meta { font-size: 12px; color: var(--muted); }
   .drow .flags { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
@@ -172,6 +174,15 @@
   .opd-page td, .opd-page th { border: 1px solid #000; padding: 4px 6px; }
   .sign { display: flex; justify-content: space-around; margin-top: 24px; }
 
+  /* min/max shelf list: one row per drug, cut into strips or kept as a sheet */
+  .mm-page { width: 190mm; margin: 0 auto 16px; padding: 8mm 6mm; background: #fff; color: #000; box-shadow: 0 0 0 1px var(--line); }
+  .mm-page h1 { font-size: 18px; text-align: center; margin-bottom: 2px; }
+  .mm-page h2 { font-size: 15px; margin: 10px 0 4px; break-after: avoid; }
+  .mm-page table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .mm-page td, .mm-page th { border: 1px solid #000; padding: 5px 6px; }
+  .mm-page td.n { text-align: right; font-size: 16px; font-weight: 700; width: 16%; }
+  .mm-page tr { break-inside: avoid; }
+
   .toast {
     position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 32px);
     background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 14px;
@@ -191,7 +202,7 @@
     .no-print, .app-header, .tabs, .toast { display: none !important; }
     main { padding: 0; max-width: none; }
     .card { border: 0; padding: 0; margin: 0; background: none; }
-    .form-page, .opd-page { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
+    .form-page, .opd-page, .mm-page { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
     .form-page { page-break-after: always; break-after: page; }
     .form-page:last-child { page-break-after: auto; break-after: auto; }
   }

@@ -12,7 +12,7 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 
 ## Status
 
-- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects), `src/Import.js` (HOSxP rows → Drugs/UsageDaily, recompute), `src/Api.js` + `src/ui/` (web app: import file, count, main-storage form, OPD list), `src/Code.js` (doGet + IPD menu), all server code tested; `tools/backtest.js`, `tools/pack-rule.js`.
+- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects), `src/Import.js` (HOSxP rows → Drugs/UsageDaily, recompute), `src/Api.js` + `src/ui/` (web app: import file, count with max/min and BELOW_MIN, main-storage form, OPD list, min/max shelf list), `src/Code.js` (doGet + IPD menu), all server code tested; `tools/backtest.js`, `tools/pack-rule.js`.
 - Deployed with `clasp push` to the Apps Script project bound to the private "IPD Stock" Sheet. `.clasp.json` (script ID) is local only; on another PC, recreate it from the script ID in the Apps Script editor (Project Settings), with `"rootDir": "src"`.
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
 - Web app v1 deployed (owner-only access). The browser code in `src/ui/Client.html` has no automated tests beyond a parse check; try changes in the deployed page.

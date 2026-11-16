@@ -56,6 +56,7 @@ test('importUsage: creates drugs, stores daily usage, clears Import, recomputes'
   assert.equal(d['KCl inj (C) **HAD**'].source_calc, 'MAIN');
   assert.equal(a10.par_updated, TODAY);
   assert.ok(a10.par_calc > 0);
+  assert.ok(a10.min_calc > 0 && a10.min_calc < a10.par_calc);
   assert.equal(a10.source_calc, 'UNKNOWN'); // no pack size yet
 
   assert.deepEqual(usage(ss), [

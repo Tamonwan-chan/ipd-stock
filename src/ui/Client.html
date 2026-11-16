@@ -22,6 +22,7 @@
   var MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   var FLAG_TEXT = {
     NOT_COUNTED: ['ยังไม่นับ', 'warn'],
+    BELOW_MIN: ['ต่ำกว่า min — ขอจาก OPD วันนี้', 'danger'],
     CRITICAL_LOW: ['ยาห้ามขาด ต่ำกว่ายอด', 'danger'],
     BIG_ORDER: ['เบิกมากผิดปกติ ตรวจยอดนับ', 'warn'],
     NO_USAGE_DATA: ['ยอดจากเภสัชกำหนด', ''],
@@ -140,6 +141,7 @@
       renderCount();
       renderForm();
       renderOpd();
+      renderMinMax();
       if (!S.tab) showTab(st.usage.to ? 'count' : 'import');
     }).catch(function (e) {
       $('hdr-status').textContent = 'โหลดข้อมูลไม่สำเร็จ: ' + errMsg(e);
@@ -158,6 +160,7 @@
     });
     if (name === 'form') renderForm();
     if (name === 'opd') renderOpdPrint();
+    if (name === 'minmax') renderMinMax();
   }
 
   function renderHeader() {
@@ -347,8 +350,7 @@
     }
     var locked = st.round.status === 'APPROVED';
     var drugs = stockedDrugs();
-    var counted = 0, ordering = 0;
-    drugs.forEach(function (d) { var l = lineOf(d); if (l.counted) counted++; if (l.qty > 0) ordering++; });
+    var c = counts(drugs), counted = c.counted, ordering = c.ordering;
     var pct = drugs.length ? Math.round(100 * counted / drugs.length) : 0;
 
     var roundOpts = st.rounds.map(function (r) {
@@ -361,11 +363,13 @@
       '<div class="row"><h2>รอบนับ ' + thDate(st.round.count_date) + '</h2>' +
       (locked ? '<span class="badge ok">อนุมัติแล้ว ' + esc(st.round.approved_at) + '</span>' : '<span class="badge">กำลังนับ</span>') +
       '<span class="spacer"></span><label class="small muted">ดูรอบ <select id="round-pick">' + roundOpts + '</select></label></div>' +
-      '<p class="muted small">ยอดที่ควรมี = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรองตามความไม่สม่ำเสมอของการใช้ ' +
+      '<p class="muted small">สูงสุด (max) = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรอง: เบิกเติมให้ถึงยอดนี้ · ' +
+      'ต่ำสุด (min) = ใช้เฉลี่ยต่อวัน × ' + st.settings.min_days + ' วัน + ยาสำรอง: ถ้าเหลือน้อยกว่านี้ ยาจะหมดก่อนของจากคลังมาถึง ให้ขอจาก OPD วันนี้ ' +
       '(ข้อมูล ' + thDate(st.usage.from) + ' – ' + thDate(st.usage.to) + ') ใส่จำนวนคงเหลือที่นับได้ แล้วโปรแกรมคำนวณยอดเบิกให้ ' +
       'ช่องว่าง = ยังไม่นับ, 0 = หมด</p>' +
       '<div class="row small"><span><b id="cnt-counted">' + counted + '</b> / ' + drugs.length + ' รายการนับแล้ว</span>' +
-      '<span>· ต้องเบิก <b id="cnt-order">' + ordering + '</b> รายการ</span><span class="spacer"></span>' +
+      '<span>· ต้องเบิก <b id="cnt-order">' + ordering + '</b> รายการ</span>' +
+      '<span>· ต่ำกว่า min <b id="cnt-below">' + c.below + '</b> รายการ</span><span class="spacer"></span>' +
       '<span id="save-state" class="save-state muted"></span></div>' +
       '<div class="progress"><div id="cnt-bar" style="width:' + pct + '%"></div></div>' +
       '</div>' +
@@ -389,7 +393,7 @@
     var st = S.state, locked = st.round.status === 'APPROVED';
     var q = S.filter.trim().toLowerCase();
     var html = '', lastLoc = null, shown = 0;
-    html += '<div class="drow head"><span>ยา</span><span class="num">ยอดที่ควรมี</span><span class="num">คงเหลือ (นับ)</span>' +
+    html += '<div class="drow head"><span>ยา</span><span class="num">สูงสุด / ต่ำสุด</span><span class="num">คงเหลือ (นับ)</span>' +
       '<span class="num">ควรเบิก</span><span class="num">เบิกจริง</span></div>';
     stockedDrugs().forEach(function (d) {
       var l = lineOf(d);
@@ -411,12 +415,13 @@
     var dis = locked ? ' disabled' : '';
     var edited = l.final_qty !== null && l.final_qty !== l.suggested;
     var flags = flagBadges(d, l);
-    return '<div class="drow' + (l.qty > 0 ? ' has-order' : '') + '" id="row-' + esc(d.drug_id) + '">' +
+    return '<div class="drow' + (l.qty > 0 ? ' has-order' : '') + (belowMin(d, l) ? ' below-min' : '') + '" id="row-' + esc(d.drug_id) + '">' +
       '<div class="cell-name"><div class="name">' + esc(d.name) +
       (d.critical ? ' <span class="badge danger">ห้ามขาด</span>' : '') + '</div>' +
       '<div class="meta">' + esc(d.strength) + ' · ' + esc(d.unit) +
       (d.factor > 1 ? ' (' + fmt(d.factor) + ' ' + esc(d.hosxp_unit || '') + ')' : '') + '</div></div>' +
-      '<div class="num"><span class="lbl">ยอดที่ควรมี</span>' + fmt(d.par / (d.factor || 1), 1) + '</div>' +
+      '<div class="num mm"><span class="lbl">สูงสุด / ต่ำสุด</span><b>' + fmt(d.par / (d.factor || 1), 1) + '</b>' +
+      '<span class="muted"> / ' + fmt(d.min / (d.factor || 1), 1) + '</span></div>' +
       '<div><span class="lbl">คงเหลือ (นับ)</span><input type="number" inputmode="decimal" step="any" min="0" data-f="on_hand" data-id="' +
       esc(d.drug_id) + '" value="' + esc(l.on_hand) + '"' + dis + '></div>' +
       '<div class="num"><span class="lbl">ควรเบิก</span><span data-sug="' + esc(d.drug_id) + '">' + (l.suggested === null ? '–' : fmt(l.suggested, 0)) + '</span></div>' +
@@ -435,6 +440,7 @@
     else {
       codes = [];
       if (!l.counted) codes.push('NOT_COUNTED');
+      if (belowMin(d, l)) codes.push('BELOW_MIN');
       if (d.critical && l.counted && num(l.on_hand) * (d.factor || 1) < d.par) codes.push('CRITICAL_LOW');
       var cycleUse = d.mean_daily * S.state.settings.cycle_days;
       if (l.counted && cycleUse > 0 && (l.suggested || 0) * (d.factor || 1) > 2 * cycleUse) codes.push('BIG_ORDER');
@@ -445,6 +451,22 @@
       var t = FLAG_TEXT[c] || [c, ''];
       return '<span class="badge ' + t[1] + '">' + esc(t[0]) + '</span>';
     }).join('');
+  }
+
+  // Same rule as the server's BELOW_MIN flag.
+  function belowMin(d, l) {
+    return l.counted && d.min > 0 && num(l.on_hand) * (d.factor || 1) < d.min;
+  }
+
+  function counts(drugs) {
+    var c = { counted: 0, ordering: 0, below: 0 };
+    drugs.forEach(function (d) {
+      var l = lineOf(d);
+      if (l.counted) c.counted++;
+      if (l.qty > 0) c.ordering++;
+      if (belowMin(d, l)) c.below++;
+    });
+    return c;
   }
 
   function onEdit() {
@@ -463,17 +485,18 @@
     var row = $('row-' + d.drug_id);
     if (!row) return;
     row.classList.toggle('has-order', l.qty > 0);
+    row.classList.toggle('below-min', belowMin(d, l));
     var sug = row.querySelector('[data-sug]');
     sug.textContent = l.suggested === null ? '–' : fmt(l.suggested, 0);
     row.querySelector('input[data-f="final_qty"]').placeholder = l.suggested === null ? '' : l.suggested;
     row.querySelector('.reason').hidden = !(l.final_qty !== null && l.final_qty !== l.suggested);
     row.querySelector('.flags').innerHTML = flagBadges(d, l);
     // counters
-    var drugs = stockedDrugs(), counted = 0, ordering = 0;
-    drugs.forEach(function (x) { var y = lineOf(x); if (y.counted) counted++; if (y.qty > 0) ordering++; });
-    $('cnt-counted').textContent = counted;
-    $('cnt-order').textContent = ordering;
-    $('cnt-bar').style.width = (drugs.length ? Math.round(100 * counted / drugs.length) : 0) + '%';
+    var drugs = stockedDrugs(), c = counts(drugs);
+    $('cnt-counted').textContent = c.counted;
+    $('cnt-order').textContent = c.ordering;
+    $('cnt-below').textContent = c.below;
+    $('cnt-bar').style.width = (drugs.length ? Math.round(100 * c.counted / drugs.length) : 0) + '%';
   }
 
   function scheduleSave() {
@@ -666,6 +689,50 @@
       '</tbody></table><div class="sign"><span>ผู้ขอ ........................................</span><span>ผู้จ่าย ........................................</span></div></div>';
   }
 
+  // --------------------------------------------------------------- min/max
+  // Shelf labels in request units, rounded up so a label never shows less than the stored level.
+  function reqUnits(x, factor) { return Math.ceil((x || 0) / (factor || 1) - 1e-9); }
+
+  function mmLines() {
+    return stockedDrugs().map(function (d) {
+      return { d: d, loc: d.location || 'ยังไม่ระบุที่เก็บ', max: reqUnits(d.par, d.factor), min: reqUnits(d.min, d.factor) };
+    });
+  }
+
+  function renderMinMax() {
+    if (!S.state) return;
+    var lines = mmLines();
+    if (!lines.length) {
+      $('mm-summary').textContent = '';
+      $('mm-print').innerHTML = '<div class="card">ยังไม่มียาที่ต้องสต็อก นำเข้าข้อมูลการใช้ยาที่แท็บ 1 ก่อน</div>';
+      return;
+    }
+    $('mm-summary').textContent = lines.length + ' รายการ · ข้อมูล ' + thDate(S.state.usage.from) + ' – ' + thDate(S.state.usage.to);
+    var html = '<div class="mm-page"><h1>ยอดสูงสุด / ต่ำสุด ห้องยาผู้ป่วยใน (IPD)</h1>' +
+      '<p class="small" style="text-align:center">คำนวณจากการใช้ยา ' + thDate(S.state.usage.from) + ' – ' + thDate(S.state.usage.to) +
+      ' · พิมพ์ ' + thDate(S.state.today) + ' · ต่ำกว่ายอดต่ำสุด → ขอจาก OPD วันนี้</p>';
+    var last = null;
+    lines.forEach(function (x) {
+      if (x.loc !== last) {
+        if (last !== null) html += '</tbody></table>';
+        html += '<h2>' + esc(x.loc) + '</h2><table><thead><tr><th>ยา</th><th style="width:14%">หน่วย</th>' +
+          '<th style="width:16%">สูงสุด</th><th style="width:16%">ต่ำสุด</th></tr></thead><tbody>';
+        last = x.loc;
+      }
+      html += '<tr><td>' + esc(x.d.name) + ' <span class="small">' + esc(x.d.strength) + '</span>' +
+        (x.d.critical ? ' <b>(ห้ามขาด)</b>' : '') + '</td><td>' + esc(x.d.unit) + '</td>' +
+        '<td class="n">' + fmt(x.max, 0) + '</td><td class="n">' + fmt(x.min, 0) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    $('mm-print').innerHTML = html;
+  }
+
+  function mmRows() {
+    return [['ที่เก็บ', 'ยา', 'ขนาด', 'หน่วย', 'สูงสุด', 'ต่ำสุด', 'ยาห้ามขาด']].concat(mmLines().map(function (x) {
+      return [x.loc, x.d.name, x.d.strength, x.d.unit, x.max, x.min, x.d.critical ? 'ใช่' : ''];
+    }));
+  }
+
   // ------------------------------------------------------------------ wiring
   function wire() {
     Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
@@ -700,6 +767,8 @@
       if (!opdLines().length) { toast('ยังไม่ได้เลือกรายการ', true); return; }
       window.print();
     };
+    $('btn-print-mm').onclick = function () { renderMinMax(); window.print(); };
+    $('btn-csv-mm').onclick = function () { download('min-max-IPD-' + S.state.today + '.csv', toCsv(mmRows())); };
     $('btn-copy-opd').onclick = function () {
       var rows = [['ลำดับ', 'รายการ', 'จำนวน', 'หน่วย', 'หมายเหตุ']].concat(opdLines().map(function (x, i) {
         return [i + 1, x.d.name + ' ' + x.d.strength, x.qty, x.d.unit, 'IPD'];

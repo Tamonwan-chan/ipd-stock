@@ -209,6 +209,47 @@ var Calc = (function () {
     return { par: par, parCalc: parCalc, source: source, W: W, mean: st.mean, sd: st.sd, useFreq: st.useFreq };
   }
 
+  /** Days from a count to that cycle's delivery, inclusive (default 1 + 1 + 0 = 2). */
+  function minDays(settings) {
+    var s = settingsWithDefaults(settings);
+    return s.lead_days + 1 + s.delay_days;
+  }
+
+  /**
+   * Min (ยอดต่ำสุด) for one drug, in HOSxP units: stock that should last from a count
+   * until that cycle's delivery arrives. Below it, the drug will probably run out first,
+   * so staff fetch it from OPD the same day.
+   *   minCalc = ceil(mean·T + z·sd·√T), T = lead_days + 1 + delay_days;
+   *   critical drugs also ≥ the worst T-day demand seen.
+   * @param {number[]} series  daily usage over the history window
+   * @param {{critical?:boolean}} drug
+   * @return {{minCalc:number, T:number}}
+   */
+  function calcMin(series, drug, settings) {
+    var s = settingsWithDefaults(settings);
+    var T = minDays(s);
+    var st = usageStats(series);
+    var critical = !!(drug && drug.critical);
+    var z = critical ? s.critical_z : s.z;
+    var minCalc = st.mean > 0 ? ceilSafe(st.mean * T + z * st.sd * Math.sqrt(T)) : 0;
+    if (critical) minCalc = Math.max(minCalc, maxWindowSum(series, T));
+    return { minCalc: minCalc, T: T };
+  }
+
+  /**
+   * Min in effect for a Drugs row: min_override if set, else min_calc; never above the par
+   * in effect (a min above max would flag every count).
+   * @return {{min:number, source:string}}  source: 'override' | 'calc' | 'none'
+   */
+  function minFromStored(drug) {
+    var par = parFromStored(drug).par;
+    var override = toNumber(drug.min_override);
+    var min, source;
+    if (override !== null) { min = override; source = 'override'; }
+    else { min = toNumber(drug.min_calc) || 0; source = min > 0 ? 'calc' : 'none'; }
+    return { min: Math.min(min, par), source: source };
+  }
+
   /**
    * Par in effect for a Drugs row, from the stored par_calc (same rules as calcPar):
    * par_override if set, else max(par_calc, min_par).
@@ -311,7 +352,7 @@ var Calc = (function () {
   /**
    * Review flags for one round line.
    * @param {{critical?:boolean, stocked?:boolean}} drug
-   * @param {{par:number, source:string, mean:number}} parInfo
+   * @param {{par:number, source:string, mean:number, min?:number}} parInfo  min in HOSxP units (minFromStored)
    * @param {{counted:boolean, onHand:number|null, qty:number|null}} order
    * @param {*} finalQty  pharmacist's quantity (blank = unchanged)
    * @param {*} requestFactor
@@ -323,6 +364,7 @@ var Calc = (function () {
     var f = toNumber(requestFactor) || 1;
     var flags = [];
     if (!order.counted) flags.push('NOT_COUNTED');
+    if (order.counted && parInfo.min > 0 && order.onHand < parInfo.min) flags.push('BELOW_MIN');
     if (drug.critical && order.counted && order.onHand < parInfo.par) flags.push('CRITICAL_LOW');
     var cycleUse = parInfo.mean * s.cycle_days;
     if (order.counted && cycleUse > 0 && order.qty * f > 2 * cycleUse) flags.push('BIG_ORDER');
@@ -410,6 +452,9 @@ var Calc = (function () {
     windowDays: windowDays,
     calcPar: calcPar,
     parFromStored: parFromStored,
+    minDays: minDays,
+    calcMin: calcMin,
+    minFromStored: minFromStored,
     supplySource: supplySource,
     classifyDrug: classifyDrug,
     stockDecision: stockDecision,

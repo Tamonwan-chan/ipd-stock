@@ -48,6 +48,8 @@ test('state: drugs with par and source, usage window, no round yet; JSON only', 
   assert.equal(d['KCl inj *HAD*'].critical, true);
   assert.ok(d['Busy tab'].par >= 160); // 10/day × 16 days, steady
   assert.equal(st.settings.window_days, 16);
+  assert.equal(st.settings.min_days, 2);
+  assert.deepEqual([d['Busy tab'].min, d['Busy tab'].min_source], [20, 'calc']); // 10/day × 2 days, steady
   // nothing that google.script.run can't send
   assert.deepEqual(JSON.parse(JSON.stringify(st)), st);
 });
@@ -70,6 +72,10 @@ test('round: start, save lines (server recomputes), reopen same round, approve l
   assert.equal(saved[kcl.drug_id].final_qty, 3);
   assert.match(saved[kcl.drug_id].flags, /CRITICAL_LOW/);
   assert.match(saved[kcl.drug_id].flags, /EDITED/);
+
+  // under min (20 for Busy tab) → BELOW_MIN
+  const low = Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 15, final_qty: '' }], ss);
+  assert.match(low[busy.drug_id].flags, /BELOW_MIN/);
 
   // a later save of the same drug updates the line, not a new one
   Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 50, final_qty: '' }], ss);

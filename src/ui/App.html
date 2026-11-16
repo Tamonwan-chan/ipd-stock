@@ -19,6 +19,7 @@
     <button role="tab" data-tab="count">2. นับยาและคำนวณยอดเบิก</button>
     <button role="tab" data-tab="form">3. ใบเบิก (คลัง)</button>
     <button role="tab" data-tab="opd">4. ขอจาก OPD</button>
+    <button role="tab" data-tab="minmax">5. ป้ายสูงสุด/ต่ำสุด</button>
   </nav>
 
   <main>
@@ -82,6 +83,21 @@
         <div id="opd-list"></div>
       </div>
       <div id="opd-print"></div>
+    </section>
+
+    <!-- 5. Min/max shelf list -->
+    <section id="tab-minmax" class="tab" hidden>
+      <div class="card no-print">
+        <h2>ป้ายยอดสูงสุด / ต่ำสุด สำหรับติดที่ชั้นยา</h2>
+        <p class="muted small">สูงสุด = เบิกเติมให้ถึงยอดนี้ทุกรอบ · ต่ำสุด = ถ้าเหลือน้อยกว่านี้ ให้ขอจาก OPD วันนี้
+          (หน่วยตามที่เบิก ปัดขึ้นเป็นจำนวนเต็ม) ยอดเปลี่ยนทุกครั้งที่นำเข้าข้อมูลใหม่ ควรพิมพ์ใหม่เมื่อยอดเปลี่ยน</p>
+        <div class="row">
+          <button class="btn primary" id="btn-print-mm">พิมพ์ป้าย</button>
+          <button class="btn" id="btn-csv-mm">ดาวน์โหลด Excel (.csv)</button>
+          <span id="mm-summary" class="muted small"></span>
+        </div>
+      </div>
+      <div id="mm-print" class="paper-wrap"></div>
     </section>
   </main>
 
