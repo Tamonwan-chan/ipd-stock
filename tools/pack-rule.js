@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Apply the 1-pack rule (issue #3) to every drug in a HOSxP daily IPD dispensing export:
- * average use per cycle ≥ 1 pack → MAIN (main storage), otherwise OPD.
+ * busiest cycle ≥ main_pack_share (80%) of a pack → MAIN (main storage), otherwise OPD.
  *
  *   npm run pack-rule -- data/raw/<export>.csv --packs data/raw/<packs>.csv --out data/raw/<report>.csv [--cycle 14]
  *
@@ -107,24 +107,24 @@ if (opt.initPacks) {
 if (opt.out) {
   const N = settings.cycle_days;
   const out = [['drug_name', 'strength', 'drug_unit', 'unit_price', 'use_days', 'total_qty',
-    `avg_per_${N}d`, `busiest_${N}d`, 'pack_size', 'packs_per_cycle', 'source', 'stocked', 'tier', 'opd_suggestion', 'pack_note']];
+    `avg_per_${N}d`, `busiest_${N}d`, 'pack_size', 'busiest_share_of_pack', 'source', 'stocked', 'tier', 'opd_suggestion', 'pack_note']];
   const counts = {};
   for (const d of drugs.values()) {
     const series = Calc.dailySeries(d.rows, first, last);
-    const st = Calc.usageStats(series);
+    const st = Calc.drugStats(series, settings);
     const p = packs.get(d.key) || { size: '', note: '' };
     const cls = Calc.classifyDrug({ name: d.name, unit: d.unit, unit_price: d.unit_price, pack_size: p.size }, st, settings);
     const perCycle = st.mean * N;
     const pack = Calc.toNumber(p.size);
     counts[cls.source || 'placeholder'] = (counts[cls.source || 'placeholder'] || 0) + 1;
     d.out = [d.name, d.strength, d.unit, d.unit_price, Math.round(st.useFreq * st.days), st.total,
-      round(perCycle), Calc.maxWindowSum(series, N), p.size, pack ? round(perCycle / pack, 2) : '',
+      round(perCycle), st.cycleMax, p.size, pack ? round(st.cycleMax / pack, 2) : '',
       cls.source || '', cls.stocked ? 'Y' : '', cls.tier,
       cls.source === 'OPD' ? Calc.opdSuggestion(st.mean, 1, settings) : '', p.note];
     d.sortKey = { MAIN: 0, OPD: 1, UNKNOWN: 2 }[cls.source] ?? 3;
-    d.perCycle = perCycle;
+    d.cycleMax = st.cycleMax;
   }
-  const sorted = [...drugs.values()].sort((a, b) => a.sortKey - b.sortKey || b.perCycle - a.perCycle);
+  const sorted = [...drugs.values()].sort((a, b) => a.sortKey - b.sortKey || b.cycleMax - a.cycleMax);
   writeCsv(opt.out, out.concat(sorted.map(d => d.out)));
   console.log(`data     ${first} → ${last} (${Calc.daysInclusive(first, last)} days), ${drugs.size} drugs, cycle ${N} days`);
   console.log(`source   ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}`);

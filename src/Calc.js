@@ -21,6 +21,7 @@ var Calc = (function () {
     history_days: 90,       // usage history used for par
     z: 1.65,                // safety factor, normal drugs
     critical_z: 2.33,       // safety factor, critical drugs
+    main_pack_share: 0.8,   // busiest cycle uses at least this share of a pack -> main storage, else OPD
     min_use_freq: 1 / 7,    // fallback when pack_size is unknown: below this share of days used, not stocked
     expensive_value: 5000,  // THB of usage over the history window ...
     expensive_max_freq: 0.5 // ... combined with use on fewer than this share of days
@@ -158,6 +159,17 @@ var Calc = (function () {
     return best;
   }
 
+  /**
+   * usageStats plus `cycleMax`, the busiest cycle_days-long stretch in the series
+   * (input for the 1-pack rule).
+   */
+  function drugStats(series, settings) {
+    var s = settingsWithDefaults(settings);
+    var st = usageStats(series);
+    st.cycleMax = maxWindowSum(series, s.cycle_days);
+    return st;
+  }
+
   // -------------------------------------------------------------------- par
 
   /** Days from count to the next delivery, inclusive (default 14 + 1 + 1 + 0 = 16). */
@@ -199,24 +211,24 @@ var Calc = (function () {
 
   /**
    * Where a drug should come from (DESIGN §5.2, issue #3):
-   *   average use per cycle (mean daily use × cycle_days) ≥ 1 pack → 'MAIN' (main storage, par-based)
-   *   otherwise                                                     → 'OPD'  (fetched from OPD, optional)
-   *   pack size unknown                                             → 'UNKNOWN'
-   * @param {number} meanDaily  mean daily use in HOSxP units
-   * @param {*} packSize        HOSxP units per pack (blank = unknown)
+   *   busiest cycle in the history ≥ main_pack_share (80%) of a pack → 'MAIN' (main storage, par-based)
+   *   otherwise                                                       → 'OPD'  (fetched from OPD, optional)
+   *   pack size unknown                                               → 'UNKNOWN'
+   * @param {number} cycleMax  largest use over any cycle_days-long stretch, in HOSxP units (drugStats)
+   * @param {*} packSize       HOSxP units per pack (blank = unknown)
    */
-  function supplySource(meanDaily, packSize, settings) {
+  function supplySource(cycleMax, packSize, settings) {
     var s = settingsWithDefaults(settings);
     var pack = toNumber(packSize);
     if (pack === null || pack <= 0) return 'UNKNOWN';
-    return (meanDaily || 0) * s.cycle_days >= pack - EPS ? 'MAIN' : 'OPD';
+    return (cycleMax || 0) >= s.main_pack_share * pack - EPS ? 'MAIN' : 'OPD';
   }
 
   /**
    * Suggested supply source, stock-list membership and review tier for one drug.
    * `stocked` = counted at each round and ordered up to par from main storage.
    * @param {{name:string, unit?:string, unit_price?:*, pack_size?:*}} d
-   * @param {{mean?:number, total?:number, useFreq:number}} stats  usage over the history window
+   * @param {{cycleMax?:number, total?:number, useFreq:number}} stats  drugStats over the history window
    * @return {{stocked:boolean, critical:boolean, tier:string, source:string|null}}
    *   tier:   'placeholder' | 'critical' | 'expensive' | 'regular' | 'opd' | 'rare'
    *   source: 'MAIN' | 'OPD' | 'UNKNOWN' (pack size missing) | null (placeholder)
@@ -226,7 +238,7 @@ var Calc = (function () {
     if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder', source: null };
     // HAD drugs must never run out: always main storage (open question in issue #3).
     if (isCriticalName(d.name)) return { stocked: true, critical: true, tier: 'critical', source: 'MAIN' };
-    var source = supplySource(stats.mean, d.pack_size, s);
+    var source = supplySource(stats.cycleMax, d.pack_size, s);
     var value = (stats.total || 0) * (toNumber(d.unit_price) || 0);
     if (value >= s.expensive_value && stats.useFreq < s.expensive_max_freq) {
       return { stocked: false, critical: false, tier: 'expensive', source: source }; // pharmacist sets min_par
@@ -354,6 +366,7 @@ var Calc = (function () {
     dailySeries: dailySeries,
     usageStats: usageStats,
     maxWindowSum: maxWindowSum,
+    drugStats: drugStats,
     windowDays: windowDays,
     calcPar: calcPar,
     supplySource: supplySource,

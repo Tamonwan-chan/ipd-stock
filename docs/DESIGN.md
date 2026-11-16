@@ -4,7 +4,7 @@ Status: **draft v0.4**, 16 Nov 2026. Based on [PRD.md](PRD.md), IPD staff answer
 
 Changes from v0.1: no pack boxes (OPD accepts plain units); IPD lines are added to OPD's own requisition; usage is stored daily.
 Changes from v0.2: par uses the standard periodic-review safety-stock formula (it beat the percentile method at equal stock); liquids dispensed per ml are counted and requested in whole bottles; expensive, infrequent drugs get their own tier; home medications (HM) confirmed to come from IPD stock, so they stay in the usage data.
-Changes from v0.3 (issues #1–#4): IPD requests from **main storage (คลัง) every 2 weeks** on its own form ใบเบิกหรือใบส่งคืน, no longer through OPD's weekly requisition; drugs used less than **one pack per cycle** are fetched from OPD instead, as a separate, optional request; quantities stay in units.
+Changes from v0.3 (issues #1–#4): IPD requests from **main storage (คลัง) every 2 weeks** on its own form ใบเบิกหรือใบส่งคืน, no longer through OPD's weekly requisition; drugs that never used **80% of a pack in a cycle** are fetched from OPD instead, as a separate, optional request; quantities stay in units.
 
 ## 1. What round 1 must do
 
@@ -13,7 +13,7 @@ From PRD section 2, nothing more:
 1. Compute a **par level** (ยอดที่ควรมี) per drug from real usage.
 2. At each count (every 2 weeks), take on-hand quantities and compute **how much to order**.
 3. Produce a **main-storage requisition** laid out like the paper form ใบเบิกหรือใบส่งคืน: drug name, unit, on-hand, quantity in dispensing units (e.g. `Vitamin B complex 1500 เม็ด`) (§6).
-4. Produce a separate, optional **OPD list** for drugs used less than one pack per cycle (§5.2).
+4. Produce a separate, optional **OPD list** for drugs that never used 80% of a pack in a cycle (§5.2).
 
 Out of scope for round 1: automatic stock deduction, live HIS integration, expiry tracking, receiving/check-in records.
 
@@ -70,6 +70,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | `history_days` | 90 | usage history used to compute par |
 | `z` | 1.65 | safety factor, normal drugs (nominal 95%; ~93% achieved on real data) |
 | `critical_z` | 2.33 | safety factor, `critical` drugs (nominal 99%) |
+| `main_pack_share` | 0.8 | busiest cycle uses at least this share of a pack → main storage, else OPD (§5.2) |
 | `min_use_freq` | 0.143 | fallback while `pack_size` is blank: drugs used on fewer than this share of days (≈ less than weekly) are not stocked |
 | `expensive_value` | 5000 | THB of usage over the history window that, together with … |
 | `expensive_max_freq` | 0.5 | … use on fewer than this share of days, puts a drug in the pharmacist-set tier (§5.2) |
@@ -169,25 +170,28 @@ Ordering every 2 weeks halves the counting work but needs ~40% more stock on the
 | **every 2 weeks** | 16 | 9.4% | ~40 | 172k THB | 113k THB |
 | every 2 weeks, z = 1.28 | 16 | 11.6% | ~49 | 162k THB | 103k THB |
 
-Each cycle is a little more likely to run short (the window is longer, so one bad stretch matters more), but there are half as many cycles, so shortfalls per month drop. The cost is ~50–60% more stock on the shelf. Drugs used less than one pack per cycle leave the formula and come from OPD (§5.2), which will lower these figures once pack sizes are filled in.
+Each cycle is a little more likely to run short (the window is longer, so one bad stretch matters more), but there are half as many cycles, so shortfalls per month drop. The cost is ~50–60% more stock on the shelf. Drugs that come from OPD leave the formula (§5.2), which will lower these figures once pack sizes are filled in.
 
 Caveats: one month of out-of-sample data; 3 months can't show seasonality; "short" counts any shortfall, even 1 unit, so it overstates real trips. Use these numbers to compare options, not as a forecast.
 
 ### 5.2 What to stock: main storage or OPD
 
-**1-pack rule (v0.4).** A drug is requested from main storage when its average use per cycle reaches one pack:
+**1-pack rule (v0.4).** A drug is requested from main storage when its **busiest cycle** in the history window used **at least 80% of a pack** (owner's decision, 16 Nov: a drug that went through 91 of a box of 100 in its busiest 2 weeks should be requested as a box from main storage):
 
 ```
-d̄ · cycle_days ≥ pack_size   →  source = MAIN  (counted, par-based, on the main-storage form)
-otherwise                    →  source = OPD   (fetched from OPD when staff choose; suggestion = one cycle of use)
-pack_size blank              →  source = UNKNOWN, falls back to the use-frequency table below
+cycleMax       = largest use over any cycle_days-long stretch of the history (Calc.drugStats)
+cycleMax ≥ main_pack_share · pack_size  →  source = MAIN  (counted, par-based, on the main-storage form)
+otherwise                               →  source = OPD   (fetched from OPD when staff choose; suggestion = one cycle of average use)
+pack_size blank                         →  source = UNKNOWN, falls back to the use-frequency table below
 ```
 
-`critical` (HAD) drugs are always `MAIN`. Expensive, infrequent drugs keep their own tier whatever the rule says. `npm run pack-rule` applies the rule to a HOSxP export and writes a per-drug report to `data/raw/` (never committed).
+`main_pack_share` = 0.8 (Settings). `critical` (HAD) drugs are always `MAIN`. Expensive, infrequent drugs keep their own tier whatever the rule says. `npm run pack-rule` applies the rule to a HOSxP export and writes a per-drug report to `data/raw/` (never committed).
 
-Notes from the first run (Aug–Oct data, 26 pack sizes taken from main storage's issue slip and the requisition form):
-- The rule uses the 3-month average. A drug whose use rose recently looks smaller than its latest requests. For at least one drug on IPD's current OPD list, recent requests are well above the 3-month average; check such drugs by hand.
-- Large packs (500 or 1000 tablets) send some high-use drugs to OPD: they use hundreds of tablets per cycle but less than one pack. That follows the rule as stated, but confirm with IPD that OPD is happy to supply those volumes.
+Why the busiest cycle rather than the average: the average hides drugs whose use comes in bursts, and those are the ones IPD runs short of and has to fetch from OPD. The cost is that a single large burst in 3 months is enough to make a drug `MAIN`; the pharmacist can override `source`.
+
+Notes from the first run (Aug–Oct data, 26 pack sizes taken from main storage's issue slip and the requisition form; 16 MAIN, 9 OPD, critical drugs excluded):
+- Drugs issued one at a time (pack size 1: creams, eye drops, insulin vials, irrigation bottles) become `MAIN` as soon as one is used in a cycle.
+- Some high-use drugs in packs of 1000 still come out `OPD` (hundreds of tablets in the busiest cycle, under 800). Confirm with IPD that OPD is happy to supply those volumes.
 
 **Use frequency** (fallback while `pack_size` is blank):
 
@@ -292,6 +296,6 @@ Open:
 7. **Expensive, infrequent drugs.** Pharmacist to confirm `min_par` for the ~20 drugs listed by the recompute step (§5.2).
 8. **Pack sizes.** 26 known so far (issue slip and requisition form). Where do the rest come from: main storage's item list? (#2)
 9. **OPD list.** IPD's current list of drugs fetched from OPD, to check against the 1-pack rule (#3).
-10. **1-pack rule details.** Average or busiest cycle? HAD always main storage? Is OPD happy to supply large volumes of drugs that come in packs of 500–1000? (#3, §5.2)
+10. **1-pack rule details.** HAD always main storage? Is OPD happy to supply large volumes of drugs that come in packs of 1000? (#3, §5.2)
 11. **หมายเลขพัสดุ.** Does main storage have an item code per drug? (#4)
 12. **Page layout.** The paper form has ~19 lines per sheet: number the printout's pages to match, or print one continuous list? (#4)

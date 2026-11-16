@@ -4,7 +4,7 @@ Context for Claude Code sessions on this repo.
 
 ## Project
 
-Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has no stock system of its own. It requests from main storage (คลัง) every 2 weeks on the paper form ใบเบิกหรือใบส่งคืน, and fetches low-use drugs (less than one pack per cycle) from the OPD pharmacy. Built on Google Apps Script + Google Sheets (the Sheet is the database).
+Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has no stock system of its own. It requests from main storage (คลัง) every 2 weeks on the paper form ใบเบิกหรือใบส่งคืน, and fetches low-use drugs (busiest 2 weeks under 80% of a pack) from the OPD pharmacy. Built on Google Apps Script + Google Sheets (the Sheet is the database).
 
 - Requirements: [docs/PRD.md](docs/PRD.md) (Thai; snapshot of a Google Doc co-edited with IPD staff, titled "PRD IPD stock")
 - Design and decisions: [docs/DESIGN.md](docs/DESIGN.md), the source of truth for formulas, data model and open questions

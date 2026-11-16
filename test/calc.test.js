@@ -146,19 +146,27 @@ test('lineFlags', () => {
   assert.deepEqual(big, ['BIG_ORDER', 'NO_USAGE_DATA']);
 });
 
-test('supplySource: 1-pack rule per cycle', () => {
-  // 100 per box, 14-day cycle: needs ≥ 100/14 ≈ 7.15 per day for main storage
-  assert.equal(Calc.supplySource(8, 100, {}), 'MAIN');
-  assert.equal(Calc.supplySource(100 / 14, 100, {}), 'MAIN'); // exactly 1 pack
-  assert.equal(Calc.supplySource(7, 100, {}), 'OPD');
-  assert.equal(Calc.supplySource(7, 100, { cycle_days: 15 }), 'MAIN');
+test('supplySource: busiest cycle vs 80% of a pack', () => {
+  assert.equal(Calc.supplySource(91, 100, {}), 'MAIN'); // 91 of a box of 100
+  assert.equal(Calc.supplySource(80, 100, {}), 'MAIN'); // exactly 80%
+  assert.equal(Calc.supplySource(79, 100, {}), 'OPD');
+  assert.equal(Calc.supplySource(79, 100, { main_pack_share: 0.75 }), 'MAIN');
   assert.equal(Calc.supplySource(0, 1, {}), 'OPD');
+  assert.equal(Calc.supplySource(1, 1, {}), 'MAIN');
   assert.equal(Calc.supplySource(5, '', {}), 'UNKNOWN');
   assert.equal(Calc.supplySource(5, 0, {}), 'UNKNOWN');
 });
 
+test('drugStats: busiest cycle_days stretch', () => {
+  const series = Array(30).fill(0);
+  series[3] = 50; series[10] = 41; series[28] = 60; // days 3 and 10 share a 14-day stretch; 10 and 28 don't
+  assert.equal(Calc.drugStats(series, {}).cycleMax, 91);
+  assert.equal(Calc.drugStats(series, { cycle_days: 7 }).cycleMax, 60);
+  near(Calc.drugStats(series, {}).mean, 151 / 30);
+});
+
 test('classifyDrug', () => {
-  const st = (useFreq, total = 100, mean = 1) => ({ useFreq, total, mean });
+  const st = (useFreq, total = 100, cycleMax = 14) => ({ useFreq, total, cycleMax });
   assert.deepEqual(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)),
     { stocked: false, critical: false, tier: 'placeholder', source: null });
   assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**', pack_size: 100 }, st(0.01)),
@@ -167,9 +175,9 @@ test('classifyDrug', () => {
   assert.equal(Calc.classifyDrug({ name: 'Costly inj', unit_price: 1000, pack_size: 1 }, st(0.2, 10)).source, 'MAIN');
   assert.equal(Calc.classifyDrug({ name: 'Costly but daily', unit_price: 1000 }, st(0.9, 10)).tier, 'regular');
   // pack size known: the 1-pack rule decides, regardless of use frequency
-  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 100', pack_size: 100 }, st(1, 900, 10)),
+  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 100', pack_size: 100 }, st(0.1, 300, 91)),
     { stocked: true, critical: false, tier: 'regular', source: 'MAIN' });
-  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 1000', pack_size: 1000 }, st(1, 900, 10)),
+  assert.deepEqual(Calc.classifyDrug({ name: 'Box of 1000', pack_size: 1000 }, st(1, 900, 140)),
     { stocked: false, critical: false, tier: 'opd', source: 'OPD' });
   // pack size unknown: use frequency fallback
   assert.deepEqual(Calc.classifyDrug({ name: 'Weekly', unit_price: 1 }, st(1 / 7)),

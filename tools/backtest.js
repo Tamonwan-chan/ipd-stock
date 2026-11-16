@@ -89,7 +89,7 @@ let starts = 0, short = 0, peak = 0, avg = 0;
 const tiers = {}, sources = {};
 for (const d of drugs.values()) {
   const train = Calc.dailySeries(d.rows, first, trainEnd);
-  const stats = Calc.usageStats(train);
+  const stats = Calc.drugStats(train, settings);
   const cls = Calc.classifyDrug(d, stats, settings);
   tiers[cls.tier] = (tiers[cls.tier] || 0) + 1;
   if (cls.source) sources[cls.source] = (sources[cls.source] || 0) + 1;
