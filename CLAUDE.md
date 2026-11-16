@@ -13,7 +13,7 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 ## Status
 
 - Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects) + `src/Code.js` (menu: create tabs), all tested; `tools/backtest.js`, `tools/pack-rule.js`.
-- Not yet deployed to the Apps Script project (no `.clasp.json` here).
+- Deployed with `clasp push` to the Apps Script project bound to the private "IPD Stock" Sheet. `.clasp.json` (script ID) is local only; on another PC, recreate it from the script ID in the Apps Script editor (Project Settings), with `"rootDir": "src"`.
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
 - Next: `Import.js` (HOSxP paste → UsageDaily/Drugs, recompute par), then the count/review/output web app. See DESIGN §9 for questions still open with IPD staff.
 
@@ -23,7 +23,10 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 npm test                                   # unit tests (node --test), no dependencies
 npm run backtest -- data/raw/<export>.csv --split 2026-10-01 [--z 1.65] [--delay 3] [--cycle 14] [--packs data/raw/pack-sizes.csv]
 npm run pack-rule -- data/raw/<export>.csv --packs data/raw/pack-sizes.csv --out data/raw/pack-rule-report.csv
+clasp push                                 # upload src/ to the bound Apps Script project (needs .clasp.json)
 ```
+
+clasp 3: to bind a script to an existing Sheet, use `clasp create-script --parentId <sheetId> --rootDir src` **without** `--type`. With `--type sheets` it ignores `--parentId` and creates a new, empty spreadsheet. `create-script` also overwrites `src/appsscript.json` with a default (New York time zone): restore it with `git checkout -- src/appsscript.json` before pushing.
 
 ## Rules
 
