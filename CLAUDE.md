@@ -12,9 +12,10 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 
 ## Status
 
-- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions) with tests, `tools/backtest.js`, `tools/pack-rule.js`.
+- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects) + `src/Code.js` (menu: create tabs), all tested; `tools/backtest.js`, `tools/pack-rule.js`.
+- Not yet deployed to the Apps Script project (no `.clasp.json` here).
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
-- Next: Sheet schema + `Db.js`, `Import.js` (HOSxP paste → UsageDaily/Drugs, recompute par), then the count/review/output web app. See DESIGN §9 for questions still open with IPD staff.
+- Next: `Import.js` (HOSxP paste → UsageDaily/Drugs, recompute par), then the count/review/output web app. See DESIGN §9 for questions still open with IPD staff.
 
 ## Commands
 
@@ -28,8 +29,9 @@ npm run pack-rule -- data/raw/<export>.csv --packs data/raw/pack-sizes.csv --out
 
 - **Public repo.** Never commit hospital data, spreadsheet/script IDs, `.clasp.json`, or per-drug usage numbers. HOSxP exports go in `data/raw/` (gitignored). Docs may quote aggregates only.
 - The usage data lives in the owner's private Google Sheet "IPD Stock", tab "Rate Aug-Oct 26" (HOSxP daily export, Aug–Oct 2026). To work with it locally, export it as CSV into `data/raw/` with `order_date` as d/m/yyyy. Pack sizes are kept in `data/raw/pack-sizes.csv` (drug_name, strength, drug_unit, pack_size, pack_note).
-- `src/Calc.js` must stay free of Apps Script services so it runs in Node; it exposes the global `Calc` and `module.exports`. Dates inside Calc are ISO `YYYY-MM-DD` strings.
+- `src/Calc.js` and `src/Schema.js` must stay free of Apps Script services so they run in Node; each exposes a global (`Calc`, `Schema`) and `module.exports`. Dates inside Calc are ISO `YYYY-MM-DD` strings.
+- `src/Db.js` touches the Sheet only through the spreadsheet object passed in (default `SpreadsheetApp.getActiveSpreadsheet()`). If it needs a new SpreadsheetApp method, add it to `test/fake-spreadsheet.js` too. Resolve other modules inside functions (`calc_()`, `schema_()`), not at load time: Apps Script file load order isn't guaranteed.
 - Plain JavaScript (Apps Script V8), no build step.
 - Language: code, comments and DESIGN in English; anything IPD staff read (README, UI text, printouts) in Thai.
-- `npm test` runs `node --test` with no path: on Node 24, `node --test test/` fails.
+- `npm test` runs `node --test "test/*.test.js"` (Node ≥ 22 expands the glob). `node --test test/` fails on Node 24.
 - Git identity for commits: `Tamonwan-chan <305665671+Tamonwan-chan@users.noreply.github.com>` (keeps the owner's personal email out of public history). Set it per repo: `git config user.email ...`.

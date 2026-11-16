@@ -41,7 +41,8 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 ┌────────────────────────────────┴─────────────────────────────────────────────┐
 │ Apps Script project (this repo, deployed with clasp)                         │
 │  Calc.js   pure functions: mean/SD, worst window, par, order (Node-tested)
-│  Db.js     read/write sheets as arrays of objects, LockService               │
+│  Schema.js tabs, columns and column types (plain data)                       │
+│  Db.js     read/write sheets as arrays of objects, LockService (Node-tested) │
 │  Import.js HOSxP CSV → UsageDaily, new drugs → Drugs, recompute par         │
 │  Rounds.js round lifecycle                                                   │
 │  Code.js   onOpen menu (admin) + doGet web app routing                       │
@@ -56,11 +57,16 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 - **Web app** for the jobs done every round (count, review, output). Admin jobs (import, drug list) stay in the Sheet UI; they're done quarterly by someone comfortable with spreadsheets.
 - **`Calc.js` has no Apps Script calls**, so it runs unchanged in Node for tests. It ends with
   `if (typeof module !== 'undefined') module.exports = {...}`.
-- Scale: ~340 drugs; ~12k usage rows per quarter (~47k/year); 52 rounds/year. Well within Sheets limits. Writes go through `LockService`.
+- **`Db.js` takes the spreadsheet as an argument** (default: the bound one) and uses only a dozen SpreadsheetApp calls, so tests run it against an in-memory fake (`test/fake-spreadsheet.js`).
+- Scale: ~340 drugs; ~12k usage rows per quarter (~47k/year); 26 rounds/year. Well within Sheets limits. Writes go through `LockService`.
 
 ## 4. Data model (one sheet tab per table, row 1 = headers)
 
-**Settings**: key / value
+Defined in `src/Schema.js`; **IPD › ตั้งค่าแท็บข้อมูล** (`setupSheets` → `Db.ensureSchema`) creates missing tabs, appends missing columns to row 1 (never reorders or deletes), and adds missing Settings keys with their defaults. Other tabs, such as the original HOSxP export, are left alone. Db reads columns by name, so the admin may reorder columns or add their own.
+
+Each column has a type. Text columns get the plain-text format so Sheets doesn't turn values like `2026-11-17` (a `round_id`) or `00123` (an `item_code`) into a date or a number. Date columns hold real Sheet dates and are read as ISO `YYYY-MM-DD`; this needs the script and the spreadsheet both set to the Asia/Bangkok time zone. Checkbox columns read blank as FALSE.
+
+**Settings**: key / value / note (Thai explanation for the admin)
 
 | key | default | meaning |
 | :- | :- | :- |
@@ -89,6 +95,7 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `request_factor` | 240 | `unit`s per `request_unit` (KCl syrup: 240 ml per bottle); blank = 1 |
 | `request_name` | Vitamin B complex | optional, name to print on the requisition; blank = `hosxp_name` |
 | `pack_size` | 100 | `unit`s per pack as main storage issues it (box of 100). Used only for the 1-pack rule (§5.2); quantities are not rounded to packs |
+| `pack_note` | issue slip 11 Nov 2026 | where the pack size came from |
 | `source` | MAIN | `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional). Suggested by recompute, pharmacist can override |
 | `item_code` | | main storage's item code (หมายเลขพัสดุ) if one exists (§9) |
 | `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
@@ -105,11 +112,11 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 
 Match key on import: `hosxp_name + strength + unit`.
 
-**UsageDaily**: `date`, `drug_id`, `qty`. Only nonzero rows are needed; missing days count as 0. Price columns are not imported.
+**UsageDaily**: `date`, `drug_id`, `qty`. Only nonzero rows are needed; missing days count as 0. Price columns are not imported. Importing a period replaces the rows dated within it (`Db.replaceUsage`), so a re-import never double counts.
 
 **Rounds**: `round_id` (the count date, e.g. `2026-11-17`; ISO week numbers no longer fit a 2-week cycle), `count_date`, `status`, `counted_by`, `submitted_at`, `reviewed_by`, `approved_at`, `note`
 
-**RoundLines**: frozen at approval
+**RoundLines**: one row per round and drug (key `round_id` + `drug_id`, written with `Db.upsert` as each count autosaves); frozen at approval
 `round_id`, `drug_id`, `on_hand`, `par_used`, `suggested_qty`, `final_qty`, `change_reason`, `flags`
 
 **Users**: `email`, `name`, `role` (`counter` / `pharmacist` / `admin`)
@@ -266,10 +273,10 @@ Status flow: `COUNTING → REVIEW → APPROVED`. The pharmacist can send a round
 
 ```
 src/                 Apps Script project root (clasp rootDir)
-  appsscript.json
-  Code.js  Calc.js  Db.js  Import.js  Rounds.js
+  appsscript.json          time zone Asia/Bangkok, V8
+  Code.js  Calc.js  Schema.js  Db.js  Import.js  Rounds.js
   ui/ Count.html  Review.html  Output.html  Styles.html
-test/calc.test.js    node --test, covers Calc.js only
+test/                node --test: calc.test.js, db.test.js (+ fake-spreadsheet.js)
 tools/backtest.js    replays a HOSxP export through Calc.js (aggregates only)
 tools/pack-rule.js   applies the 1-pack rule; per-drug report goes to data/raw/ only
 docs/                PRD, DESIGN

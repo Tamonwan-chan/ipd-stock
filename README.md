@@ -8,7 +8,7 @@
 
 ## สถานะ (16 พ.ย. 2569)
 
-มีส่วนคำนวณ (Calc.js) และเครื่องมือทดสอบกับข้อมูลจริงแล้ว ยังไม่ได้ทำหน้าจอนับยา เรื่องที่ยังเปิดอยู่ดูได้ที่ [Issues](https://github.com/Tamonwan-chan/ipd-stock/issues)
+มีส่วนคำนวณ (Calc.js) ส่วนอ่าน/เขียนข้อมูลใน Google Sheet (Db.js เมนู IPD › ตั้งค่าแท็บข้อมูล สร้างแท็บให้อัตโนมัติ) และเครื่องมือทดสอบกับข้อมูลจริงแล้ว ยังไม่ได้ทำหน้าจอนับยา เรื่องที่ยังเปิดอยู่ดูได้ที่ [Issues](https://github.com/Tamonwan-chan/ipd-stock/issues)
 
 **เปลี่ยนแปลง 16 พ.ย. 2569**
 
@@ -50,7 +50,7 @@
 ```
 docs/        เอกสารโจทย์ (PRD) และการออกแบบ (DESIGN)
 data/raw/    รายงานจาก IT (ไม่เก็บใน git ดู data/README.md)
-src/         โค้ด Apps Script (ตอนนี้มีส่วนคำนวณ Calc.js)
+src/         โค้ด Apps Script (Calc.js คำนวณ, Schema.js + Db.js ฐานข้อมูลใน Sheet, Code.js เมนู)
 test/        ชุดทดสอบส่วนคำนวณ (npm test)
 tools/       เครื่องมือทดสอบสูตรกับข้อมูลจริง (npm run backtest) และแยกยาคลัง/OPD ตามเกณฑ์ 80% ของแพ็ค (npm run pack-rule)
 ```

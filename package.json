@@ -5,11 +5,11 @@
   "description": "Drug stock and requisition tool for a hospital inpatient (IPD) pharmacy (Google Apps Script + Google Sheets)",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test \"test/*.test.js\"",
     "backtest": "node tools/backtest.js",
     "pack-rule": "node tools/pack-rule.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
