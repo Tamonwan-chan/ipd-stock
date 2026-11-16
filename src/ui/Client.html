@@ -179,10 +179,10 @@
       $('data-status').innerHTML = '<p class="muted">ยังไม่มีข้อมูลการใช้ยาในระบบ</p>';
       return;
     }
-    var main = 0, opd = 0, unknown = 0, stocked = 0;
+    var opd = 0, stocked = 0;
     drugs.forEach(function (d) {
       if (d.stocked) stocked++;
-      if (d.source === 'MAIN') main++; else if (d.source === 'OPD') opd++; else if (d.source === 'UNKNOWN') unknown++;
+      if (d.source === 'OPD' && d.use_freq > 0) opd++;
     });
     $('data-status').innerHTML =
       '<h2>ข้อมูลในระบบ</h2>' +
@@ -190,10 +190,10 @@
       ' · ยอดที่ควรมี = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรอง</p>' +
       '<div class="stats">' +
       stat(drugs.length, 'ยาทั้งหมด') + stat(stocked, 'ต้องนับและเบิกจากคลัง') +
-      stat(main, 'เกณฑ์แพ็ค: เบิกจากคลัง') + stat(opd, 'เกณฑ์แพ็ค: ขอจาก OPD') +
-      stat(unknown, 'ยังไม่ได้ใส่ขนาดแพ็ค') +
+      stat(opd, 'ใช้ไม่บ่อย: ขอจาก OPD') +
       '</div>' +
-      (unknown ? '<p class="muted small">ใส่ขนาดแพ็คในคอลัมน์ pack_size ของแท็บ Drugs ใน Google Sheet แล้วใช้เมนู IPD › คำนวณยอดที่ควรมีใหม่</p>' : '');
+      '<p class="muted small">ยาที่มีการใช้อย่างน้อย 1 ใน ' + Math.round(1 / st.settings.min_use_freq) +
+      ' วัน → เบิกจากคลัง น้อยกว่านั้น → ขอจาก OPD เภสัชเปลี่ยนได้ในคอลัมน์ source ของแท็บ Drugs</p>';
   }
   function stat(n, label) { return '<div class="stat"><b>' + fmt(n, 0) + '</b><span class="muted small">' + esc(label) + '</span></div>'; }
 
@@ -324,8 +324,8 @@
         '<li>ข้อมูลการใช้ยา: แทนที่ ' + fmt(r.usage.removed, 0) + ' แถวเดิม เพิ่ม ' + fmt(r.usage.added, 0) + ' แถว</li>' +
         '<li>ยาใหม่ ' + r.newDrugs.length + ' รายการ · ปรับราคา ' + r.priceUpdates + ' รายการ</li>' +
         '<li>เบิกจากคลัง ' + (rc.source.MAIN || 0) + ' · ขอจาก OPD ' + (rc.source.OPD || 0) +
-        ' · ยังไม่รู้ขนาดแพ็ค ' + (rc.source.UNKNOWN || 0) + ' · ต้องนับ ' + rc.stocked + ' รายการ</li>' +
-        (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ให้เภสัชกำหนด min_par ในแท็บ Drugs</li>' : '') +
+        ' · ต้องนับ ' + rc.stocked + ' รายการ</li>' +
+        (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ตอนนี้ให้ขอจาก OPD ถ้าจะสต็อก ให้เภสัชกำหนด min_par ในแท็บ Drugs</li>' : '') +
         '</ul></div>';
       return reload();
     }).catch(function (e) {
@@ -636,7 +636,7 @@
     var q = S.opdFilter.trim().toLowerCase();
     var list = opdDrugs();
     if (!list.length) {
-      $('opd-list').innerHTML = '<p class="muted">ยังไม่มียาที่อยู่ในกลุ่มขอจาก OPD (ต้องใส่ pack_size ในแท็บ Drugs ก่อน)</p>';
+      $('opd-list').innerHTML = '<p class="muted">ยังไม่มียาที่อยู่ในกลุ่มขอจาก OPD (นำเข้าข้อมูลการใช้ยาที่แท็บ 1 ก่อน)</p>';
       renderOpdPrint();
       return;
     }

@@ -6,8 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
-    "backtest": "node tools/backtest.js",
-    "pack-rule": "node tools/pack-rule.js"
+    "backtest": "node tools/backtest.js"
   },
   "engines": {
     "node": ">=22"

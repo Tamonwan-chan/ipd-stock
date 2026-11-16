@@ -21,8 +21,7 @@ var Calc = (function () {
     history_days: 90,       // usage history used for par
     z: 1.65,                // safety factor, normal drugs
     critical_z: 2.33,       // safety factor, critical drugs
-    main_pack_share: 0.8,   // busiest cycle uses at least this share of a pack -> main storage, else OPD
-    min_use_freq: 1 / 7,    // fallback when pack_size is unknown: below this share of days used, not stocked
+    min_use_freq: 1 / 7,    // used on at least this share of days -> main storage (stocked), else OPD
     expensive_value: 5000,  // THB of usage over the history window ...
     expensive_max_freq: 0.5 // ... combined with use on fewer than this share of days
   };
@@ -159,17 +158,6 @@ var Calc = (function () {
     return best;
   }
 
-  /**
-   * usageStats plus `cycleMax`, the busiest cycle_days-long stretch in the series
-   * (input for the 1-pack rule).
-   */
-  function drugStats(series, settings) {
-    var s = settingsWithDefaults(settings);
-    var st = usageStats(series);
-    st.cycleMax = maxWindowSum(series, s.cycle_days);
-    return st;
-  }
-
   // -------------------------------------------------------------------- par
 
   /** Days from count to the next delivery, inclusive (default 14 + 1 + 1 + 0 = 16). */
@@ -265,28 +253,24 @@ var Calc = (function () {
   }
 
   /**
-   * Where a drug should come from (DESIGN §5.2, issue #3):
-   *   busiest cycle in the history ≥ main_pack_share (80%) of a pack → 'MAIN' (main storage, par-based)
-   *   otherwise                                                       → 'OPD'  (fetched from OPD, optional)
-   *   pack size unknown                                               → 'UNKNOWN'
-   * @param {number} cycleMax  largest use over any cycle_days-long stretch, in HOSxP units (drugStats)
-   * @param {*} packSize       HOSxP units per pack (blank = unknown)
+   * Where a drug should come from (DESIGN §5.2): drugs used on at least min_use_freq of days
+   * (default 1/7, about weekly) → 'MAIN' (main storage, counted, par-based); rarer → 'OPD'
+   * (fetched from OPD when needed). Quantities are in units, so pack sizes play no part.
+   * @param {number} useFreq  share of days with any use in the history window
    */
-  function supplySource(cycleMax, packSize, settings) {
+  function supplySource(useFreq, settings) {
     var s = settingsWithDefaults(settings);
-    var pack = toNumber(packSize);
-    if (pack === null || pack <= 0) return 'UNKNOWN';
-    return (cycleMax || 0) >= s.main_pack_share * pack - EPS ? 'MAIN' : 'OPD';
+    return (useFreq || 0) >= s.min_use_freq - EPS ? 'MAIN' : 'OPD';
   }
 
   /**
    * Suggested supply source, stock-list membership and review tier for one drug.
    * `stocked` = counted at each round and ordered up to par from main storage.
-   * @param {{name:string, unit?:string, unit_price?:*, pack_size?:*}} d
-   * @param {{cycleMax?:number, total?:number, useFreq:number}} stats  drugStats over the history window
+   * @param {{name:string, unit?:string, unit_price?:*, critical?:*}} d
+   * @param {{total?:number, useFreq:number}} stats  usageStats over the history window
    * @return {{stocked:boolean, critical:boolean, tier:string, source:string|null}}
-   *   tier:   'placeholder' | 'critical' | 'expensive' | 'regular' | 'opd' | 'rare'
-   *   source: 'MAIN' | 'OPD' | 'UNKNOWN' (pack size missing) | null (placeholder)
+   *   tier:   'placeholder' | 'critical' | 'expensive' | 'regular' | 'opd'
+   *   source: 'MAIN' | 'OPD' | null (placeholder)
    */
   function classifyDrug(d, stats, settings) {
     var s = settingsWithDefaults(settings);
@@ -295,24 +279,22 @@ var Calc = (function () {
     // d.critical (the Drugs column) wins when given; otherwise the HAD tag in the name decides.
     var critical = d.critical === undefined || d.critical === null || d.critical === '' ? isCriticalName(d.name) : !!d.critical;
     if (critical) return { stocked: true, critical: true, tier: 'critical', source: 'MAIN' };
-    var source = supplySource(stats.cycleMax, d.pack_size, s);
+    var source = supplySource(stats.useFreq, s);
     var value = (stats.total || 0) * (toNumber(d.unit_price) || 0);
     if (value >= s.expensive_value && stats.useFreq < s.expensive_max_freq) {
       return { stocked: false, critical: false, tier: 'expensive', source: source }; // pharmacist sets min_par
     }
     if (source === 'MAIN') return { stocked: true, critical: false, tier: 'regular', source: source };
-    if (source === 'OPD') return { stocked: false, critical: false, tier: 'opd', source: source };
-    // Pack size unknown: fall back to use frequency until it is filled in.
-    if (stats.useFreq >= s.min_use_freq - EPS) return { stocked: true, critical: false, tier: 'regular', source: source };
-    return { stocked: false, critical: false, tier: 'rare', source: source };
+    return { stocked: false, critical: false, tier: 'opd', source: source };
   }
 
   /**
-   * Final stock decision for one drug: the pharmacist's `source` wins over the 1-pack rule.
-   *   source 'OPD'                      → not stocked
+   * Final stock decision for one drug; the pharmacist's choices win over the rule.
+   *   source 'OPD' set by pharmacist    → not stocked
    *   source 'MAIN' set by pharmacist   → stocked
-   *   rule says MAIN                    → stocked, except expensive drugs without a manual par
-   *   pack size unknown                 → classifyDrug's use-frequency fallback (expensive: manual par only)
+   *   min_par or par_override set       → stocked (the pharmacist wants it on the shelf)
+   *   expensive, infrequent             → OPD until the pharmacist sets a par
+   *   otherwise                         → the use-frequency rule (classifyDrug)
    * Critical drugs are always stocked; placeholders never.
    * @param {{source?:string, min_par?:*, par_override?:*}} drug  Drugs row
    * @param {{stocked:boolean, critical:boolean, tier:string, source:string|null}} cls  classifyDrug result
@@ -322,13 +304,12 @@ var Calc = (function () {
     if (cls.tier === 'placeholder') return { source: null, stocked: false };
     if (cls.critical) return { source: 'MAIN', stocked: true };
     var manual = norm(drug.source).toUpperCase();
-    var source = manual === 'MAIN' || manual === 'OPD' ? manual : cls.source;
+    if (manual === 'OPD') return { source: 'OPD', stocked: false };
+    if (manual === 'MAIN') return { source: 'MAIN', stocked: true };
     var manualPar = (toNumber(drug.min_par) || 0) > 0 || toNumber(drug.par_override) !== null;
-    if (source === 'OPD') return { source: source, stocked: false };
-    if (manual === 'MAIN') return { source: source, stocked: true };
-    if (cls.tier === 'expensive') return { source: source, stocked: manualPar };
-    if (source === 'MAIN') return { source: source, stocked: true };
-    return { source: source, stocked: cls.stocked };
+    if (manualPar) return { source: 'MAIN', stocked: true };
+    if (cls.tier === 'expensive') return { source: 'OPD', stocked: false };
+    return { source: cls.source, stocked: cls.source === 'MAIN' };
   }
 
   // ------------------------------------------------------------------ order
@@ -448,7 +429,6 @@ var Calc = (function () {
     dailySeries: dailySeries,
     usageStats: usageStats,
     maxWindowSum: maxWindowSum,
-    drugStats: drugStats,
     windowDays: windowDays,
     calcPar: calcPar,
     parFromStored: parFromStored,

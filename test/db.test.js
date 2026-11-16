@@ -23,8 +23,8 @@ test('ensureSchema: creates every tab with headers, frozen row 1, default settin
   }
   assert.deepEqual(ss.getSheetByName('Rate Aug-Oct 26').dump(), [['order_date']]);
   assert.deepEqual(Db.settings(ss), Calc.settingsWithDefaults({}));
-  const s = Db.readTable('Settings', ss).find(x => x.key === 'main_pack_share');
-  assert.equal(s.value, 0.8);
+  const s = Db.readTable('Settings', ss).find(x => x.key === 'min_use_freq');
+  assert.equal(s.value, 1 / 7);
   assert.ok(s.note.length > 0);
 });
 
@@ -51,7 +51,7 @@ test('ensureSchema: adds missing columns at the end, keeps order and data', () =
 test('appendRows / readTable: round trip by type, blanks, _row', () => {
   const ss = fresh();
   Db.appendRows('Drugs', [
-    { drug_id: 'D001', hosxp_name: 'Drug A', unit: 'เม็ด', pack_size: 100, stocked: true, par_updated: '2026-11-20', item_code: '00123' },
+    { drug_id: 'D001', hosxp_name: 'Drug A', unit: 'เม็ด', par_calc: 100, stocked: true, par_updated: '2026-11-20', item_code: '00123' },
     { drug_id: 'D002', hosxp_name: 'Drug B', unit: 'ขวด', request_factor: '240', critical: 'TRUE' },
   ], ss);
   const sh = ss.getSheetByName('Drugs');
@@ -61,7 +61,7 @@ test('appendRows / readTable: round trip by type, blanks, _row', () => {
   assert.equal(a._row, 2);
   assert.equal(a.par_updated, '2026-11-20');
   assert.equal(a.item_code, '00123'); // text column keeps leading zeros
-  assert.equal(a.pack_size, 100);
+  assert.equal(a.par_calc, 100);
   assert.equal(a.stocked, true);
   assert.equal(a.critical, false); // blank bool
   assert.equal(a.min_par, '');     // blank number

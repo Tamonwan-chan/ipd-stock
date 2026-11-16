@@ -171,9 +171,9 @@ var Import = (function () {
   /**
    * Recompute every drug from the last `history_days` of UsageDaily (ending at the latest
    * usage date, not today, so an old export still gives a full window).
-   * Writes use_freq, source_calc, stocked, par_calc, par_updated. Leaves the pharmacist's
-   * columns (source, critical, pack_size, min_par, par_override, ...) alone.
-   * @return {{from, to, drugs:number, stocked:number, source:Object, noPackSize:number,
+   * Writes use_freq, mean_daily, source_calc, stocked, par_calc, min_calc, par_updated. Leaves
+   * the pharmacist's columns (source, critical, min_par, par_override, min_override, ...) alone.
+   * @return {{from, to, drugs:number, stocked:number, source:Object,
    *           expensive:string[], overridden:string[]}}
    *   overridden: drugs whose `source` set by the pharmacist differs from the rule's result
    */
@@ -191,7 +191,7 @@ var Import = (function () {
       if (to === null || u.date > to) to = u.date;
       if (first === null || u.date < first) first = u.date;
     });
-    var report = { from: null, to: to, drugs: drugs.length, stocked: 0, source: {}, noPackSize: 0, expensive: [], overridden: [] };
+    var report = { from: null, to: to, drugs: drugs.length, stocked: 0, source: {}, expensive: [], overridden: [] };
     if (!drugs.length) return report;
     // Window: the last history_days, but not before the data starts (days before the
     // first import would otherwise count as zero use).
@@ -207,9 +207,9 @@ var Import = (function () {
 
     drugs.forEach(function (d) {
       var series = from ? C.dailySeries(rowsByDrug[d.drug_id] || [], from, to) : [];
-      var st = C.drugStats(series, s);
+      var st = C.usageStats(series);
       var cls = C.classifyDrug({ name: d.hosxp_name, unit: d.unit, unit_price: d.unit_price,
-        pack_size: d.pack_size, critical: d.critical }, st, s);
+        critical: d.critical }, st, s);
       var dec = C.stockDecision(d, cls);
       var par = C.calcPar(series, { critical: cls.critical }, s);
       var min = C.calcMin(series, { critical: cls.critical }, s);
@@ -225,10 +225,9 @@ var Import = (function () {
       if (dec.stocked) report.stocked++;
       var key = dec.source || 'none';
       report.source[key] = (report.source[key] || 0) + 1;
-      if (cls.source === 'UNKNOWN') report.noPackSize++;
-      if (cls.tier === 'expensive') report.expensive.push(d.hosxp_name);
+      if (cls.tier === 'expensive' && !dec.stocked) report.expensive.push(d.hosxp_name);
       var manual = String(d.source || '').trim().toUpperCase();
-      if ((manual === 'MAIN' || manual === 'OPD') && cls.source !== 'UNKNOWN' && cls.source && manual !== cls.source && !cls.critical) {
+      if ((manual === 'MAIN' || manual === 'OPD') && cls.source && manual !== cls.source && !cls.critical) {
         report.overridden.push(d.hosxp_name);
       }
     });

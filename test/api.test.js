@@ -15,22 +15,18 @@ function setup() {
   let n = 2;
   for (let day = 1; day <= 28; day++) {
     rows.push([n++, `${day}/8/2026`, 'Busy tab', '10 mg.', 'เม็ด', 10, 1]);
-    rows.push([n++, `${day}/8/2026`, 'Slow tab', '5 mg.', 'เม็ด', 1, 2]);
+    if (day % 14 === 7) rows.push([n++, `${day}/8/2026`, 'Slow tab', '5 mg.', 'เม็ด', 7, 2]); // 2 of 28 days
     rows.push([n++, `${day}/8/2026`, 'KCl inj *HAD*', '', 'Amp', day % 7 === 0 ? 5 : 0, 10]);
   }
   const r = Api.importFile(rows, ss);
   assert.equal(r.ok, true, (r.errors || []).join('\n'));
-  // pack sizes: Busy 100 (MAIN), Slow 100 (OPD)
-  const d = Object.fromEntries(Db.readTable('Drugs', ss).map(x => [x.hosxp_name, x]));
-  Db.updateFields('Drugs', [{ ...d['Busy tab'], pack_size: 100 }, { ...d['Slow tab'], pack_size: 100 }], ['pack_size'], ss);
-  require('../src/Import.js').recompute(ss, { today: '2026-11-16' });
   return ss;
 }
 
 test('importFile: rows from the page import like the Import tab', () => {
   const ss = setup();
   assert.equal(Db.readTable('Drugs', ss).length, 3);
-  assert.equal(Db.readTable('UsageDaily', ss).length, 28 * 2 + 4);
+  assert.equal(Db.readTable('UsageDaily', ss).length, 28 + 2 + 4);
   const bad = Api.importFile([[5, '31/2/2026', 'X', '', 'เม็ด', 1, 1]], ss);
   assert.equal(bad.ok, false);
   assert.match(bad.errors[0], /^แถว 5:/); // the file's row number
@@ -44,7 +40,7 @@ test('state: drugs with par and source, usage window, no round yet; JSON only', 
   const d = Object.fromEntries(st.drugs.map(x => [x.hosxp_name, x]));
   assert.deepEqual([d['Busy tab'].source, d['Busy tab'].stocked], ['MAIN', true]);
   assert.deepEqual([d['Slow tab'].source, d['Slow tab'].stocked], ['OPD', false]);
-  assert.equal(d['Slow tab'].opd_suggestion, 14);
+  assert.equal(d['Slow tab'].opd_suggestion, 7); // 14 used in 28 days → 7 per 14-day cycle
   assert.equal(d['KCl inj *HAD*'].critical, true);
   assert.ok(d['Busy tab'].par >= 160); // 10/day × 16 days, steady
   assert.equal(st.settings.window_days, 16);

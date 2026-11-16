@@ -57,7 +57,7 @@ test('importUsage: creates drugs, stores daily usage, clears Import, recomputes'
   assert.equal(a10.par_updated, TODAY);
   assert.ok(a10.par_calc > 0);
   assert.ok(a10.min_calc > 0 && a10.min_calc < a10.par_calc);
-  assert.equal(a10.source_calc, 'UNKNOWN'); // no pack size yet
+  assert.equal(a10.source_calc, 'MAIN'); // used on 2 of 3 days
 
   assert.deepEqual(usage(ss), [
     ['2026-08-01', 'D001', 6],
@@ -124,35 +124,37 @@ test('importUsage: header row pasted again is skipped; empty Import is an error'
   assert.equal(r.rows, 1);
 });
 
-test('recompute: 1-pack rule from pack_size, pharmacist source wins, columns kept', () => {
+test('recompute: use-frequency rule, pharmacist source wins, columns kept', () => {
   const ss = setup();
   const rows = [];
   for (let day = 1; day <= 28; day++) {
     const date = `${day}/8/2026`;
-    rows.push([date, 'Busy', '', 'เม็ด', 10, 1]);     // 140 per 14 days
-    rows.push([date, 'Slow', '', 'เม็ด', 1, 1]);      // 14 per 14 days
-    rows.push([date, 'Forced', '', 'เม็ด', 1, 1]);
+    rows.push([date, 'Busy', '', 'เม็ด', 10, 1]);                    // every day
+    if (day % 7 === 0) rows.push([date, 'Weekly', '', 'เม็ด', 5, 1]); // 4 of 28 days = 1/7
+    if (day % 14 === 0) {
+      rows.push([date, 'Slow', '', 'เม็ด', 30, 1]);                   // 2 of 28 days
+      rows.push([date, 'Forced', '', 'เม็ด', 1, 1]);
+    }
   }
   paste(ss, rows);
   Import.importUsage(ss, { today: TODAY });
 
   const d = drugsByName(ss);
   const set = (name, fields) => Db.updateFields('Drugs', [{ ...d[name], ...fields }], Object.keys(fields), ss);
-  set('Busy', { pack_size: 100, location: 'ตู้เก็บยา' });
-  set('Slow', { pack_size: 100 });
-  set('Forced', { pack_size: 100, source: 'MAIN' });
+  set('Busy', { location: 'ตู้เก็บยา' });
+  set('Forced', { source: 'MAIN' });
 
   const r = Import.recompute(ss, { today: '2026-11-20' });
   const after = drugsByName(ss);
   assert.deepEqual([after.Busy.source_calc, after.Busy.stocked], ['MAIN', true]);
+  assert.deepEqual([after.Weekly.source_calc, after.Weekly.stocked], ['MAIN', true]);
   assert.deepEqual([after.Slow.source_calc, after.Slow.stocked], ['OPD', false]);
   assert.deepEqual([after.Forced.source_calc, after.Forced.source, after.Forced.stocked], ['OPD', 'MAIN', true]);
   assert.equal(after.Busy.location, 'ตู้เก็บยา');
   assert.equal(after.Busy.par_updated, '2026-11-20');
   assert.equal(after.Busy.use_freq, 1);
   assert.deepEqual(r.overridden, ['Forced']);
-  assert.deepEqual(r.source, { MAIN: 2, OPD: 1 });
-  assert.equal(r.noPackSize, 0);
+  assert.deepEqual(r.source, { MAIN: 3, OPD: 1 });
   assert.deepEqual([r.from, r.to], ['2026-08-01', '2026-08-28']); // window starts where the data starts
 });
 
@@ -166,18 +168,18 @@ test('recompute: window is the last history_days when there is more data', () =>
 
 test('recompute: unticking critical in Drugs is respected', () => {
   const ss = setup();
-  paste(ss, [['1/8/2026', 'Warfarin 3 mg *HAD*', '', 'เม็ด', 1, 1]]);
+  paste(ss, [['1/8/2026', 'Warfarin 3 mg *HAD*', '', 'เม็ด', 1, 1], ['28/8/2026', 'Other', '', 'เม็ด', 1, 1]]);
   Import.importUsage(ss, { today: TODAY });
   const [w] = Db.readTable('Drugs', ss);
   assert.equal(w.stocked, true);
-  Db.updateFields('Drugs', [{ ...w, critical: false, pack_size: 100 }], ['critical', 'pack_size'], ss);
+  Db.updateFields('Drugs', [{ ...w, critical: false }], ['critical'], ss);
   Import.recompute(ss, { today: TODAY });
-  const [w2] = Db.readTable('Drugs', ss);
+  const [w2] = Db.readTable('Drugs', ss); // used 1 day in 28 → OPD
   assert.deepEqual([w2.source_calc, w2.stocked], ['OPD', false]);
 });
 
 test('recompute: no usage yet', () => {
   const ss = setup();
   assert.deepEqual(Import.recompute(ss, { today: TODAY }),
-    { from: null, to: null, drugs: 0, stocked: 0, source: {}, noPackSize: 0, expensive: [], overridden: [] });
+    { from: null, to: null, drugs: 0, stocked: 0, source: {}, expensive: [], overridden: [] });
 });

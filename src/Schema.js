@@ -35,8 +35,6 @@ var Schema = (function () {
         ['request_unit', 'string'],
         ['request_factor', 'number'],
         ['request_name', 'string'],
-        ['pack_size', 'number'],
-        ['pack_note', 'string'],
         ['source', 'string'],
         ['item_code', 'string'],
         ['unit_price', 'number'],
@@ -110,7 +108,7 @@ var Schema = (function () {
   /** Allowed values for coded columns. */
   var ENUMS = {
     source: ['MAIN', 'OPD'],
-    source_calc: ['MAIN', 'OPD', 'UNKNOWN'],
+    source_calc: ['MAIN', 'OPD'],
     location: ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา'],
     status: ['COUNTING', 'REVIEW', 'APPROVED'],
     role: ['counter', 'pharmacist', 'admin']
@@ -124,8 +122,7 @@ var Schema = (function () {
     history_days: 'จำนวนวันย้อนหลังที่ใช้คำนวณยอดที่ควรมี',
     z: 'ค่าความปลอดภัย ยาทั่วไป (1.65 ≈ 95%)',
     critical_z: 'ค่าความปลอดภัย ยา HAD / ยาห้ามขาด (2.33 ≈ 99%)',
-    main_pack_share: 'ช่วง 2 สัปดาห์ที่ใช้มากสุด ถึงสัดส่วนนี้ของ 1 แพ็ค → เบิกจากคลัง ไม่ถึง → ขอจาก OPD',
-    min_use_freq: 'ใช้ตอนยังไม่รู้ขนาดแพ็ค: ยาที่ใช้น้อยกว่าสัดส่วนวันนี้ไม่สต็อก',
+    min_use_freq: 'ยาที่มีการใช้อย่างน้อยสัดส่วนวันนี้ → เบิกจากคลัง น้อยกว่า → ขอจาก OPD (0.143 = 1 ใน 7 วัน ≈ สัปดาห์ละครั้ง)',
     expensive_value: 'มูลค่าการใช้ (บาท) ในช่วงย้อนหลัง ที่ถือว่าเป็นยาราคาสูง',
     expensive_max_freq: 'ยาราคาสูงที่ใช้น้อยกว่าสัดส่วนวันนี้ ให้เภสัชกำหนดยอดเอง'
   };

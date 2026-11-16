@@ -77,12 +77,11 @@ function recomputeLines_(r) {
   var src = r.source;
   var lines = [
     'ใช้ข้อมูลวันที่ ' + r.from + ' ถึง ' + r.to + ' ยา ' + r.drugs + ' รายการ',
-    'เบิกจากคลัง (MAIN) ' + (src.MAIN || 0) + ' · ขอจาก OPD ' + (src.OPD || 0) + ' · ยังไม่รู้ขนาดแพ็ค ' + (src.UNKNOWN || 0),
+    'เบิกจากคลัง (MAIN) ' + (src.MAIN || 0) + ' · ขอจาก OPD ' + (src.OPD || 0),
     'ต้องนับและเบิก (stocked) ' + r.stocked + ' รายการ'
   ];
-  if (r.noPackSize) lines.push('ยังไม่ได้ใส่ pack_size ' + r.noPackSize + ' รายการ (ใช้เกณฑ์ความถี่การใช้แทนไปก่อน)');
-  if (r.expensive.length) lines.push('ยาราคาสูง ใช้ไม่บ่อย ให้เภสัชกำหนด min_par: ' + listSome_(r.expensive));
-  if (r.overridden.length) lines.push('source ที่เภสัชตั้งไว้ต่างจากเกณฑ์แพ็ค: ' + listSome_(r.overridden));
+  if (r.expensive.length) lines.push('ยาราคาสูง ใช้ไม่บ่อย (ตอนนี้ให้ขอจาก OPD) ถ้าจะสต็อก ให้เภสัชกำหนด min_par: ' + listSome_(r.expensive));
+  if (r.overridden.length) lines.push('source ที่เภสัชตั้งไว้ต่างจากเกณฑ์ความถี่การใช้: ' + listSome_(r.overridden));
   return lines;
 }
 
