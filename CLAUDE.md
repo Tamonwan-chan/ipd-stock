@@ -12,10 +12,10 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 
 ## Status
 
-- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects) + `src/Code.js` (menu: create tabs), all tested; `tools/backtest.js`, `tools/pack-rule.js`.
+- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects), `src/Import.js` (HOSxP paste → Drugs/UsageDaily, recompute), `src/Code.js` (IPD menu), all tested; `tools/backtest.js`, `tools/pack-rule.js`.
 - Deployed with `clasp push` to the Apps Script project bound to the private "IPD Stock" Sheet. `.clasp.json` (script ID) is local only; on another PC, recreate it from the script ID in the Apps Script editor (Project Settings), with `"rootDir": "src"`.
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
-- Next: `Import.js` (HOSxP paste → UsageDaily/Drugs, recompute par), then the count/review/output web app. See DESIGN §9 for questions still open with IPD staff.
+- Next: the count/review/output web app (`Rounds.js` + HtmlService pages). See DESIGN §9 for questions still open with IPD staff.
 
 ## Commands
 

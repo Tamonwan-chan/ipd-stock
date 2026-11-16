@@ -209,3 +209,24 @@ test('opdLine and opdTsv', () => {
   assert.equal(Calc.opdTsv(lines),
     '1\tKCl syr. (คิดต่อ ml.) (C)\t3\tขวด\tIPD\n2\tVitamin B complex\t1500\tเม็ด\tIPD');
 });
+
+test('classifyDrug: critical column wins over the HAD name tag', () => {
+  const st = { useFreq: 1, total: 10, cycleMax: 5 };
+  assert.equal(Calc.classifyDrug({ name: 'Warfarin *HAD*', critical: false, pack_size: 100 }, st).tier, 'opd');
+  assert.equal(Calc.classifyDrug({ name: 'Plain', critical: true }, st).tier, 'critical');
+  assert.equal(Calc.classifyDrug({ name: 'X *HAD*', critical: '' }, st).tier, 'critical');
+});
+
+test('stockDecision: pharmacist source wins; expensive needs a manual par', () => {
+  const cls = (tier, source, stocked = false, critical = false) => ({ tier, source, stocked, critical });
+  assert.deepEqual(Calc.stockDecision({}, cls('placeholder', null)), { source: null, stocked: false });
+  assert.deepEqual(Calc.stockDecision({ source: 'OPD' }, cls('critical', 'MAIN', true, true)), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('regular', 'MAIN', true)), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({ source: 'opd' }, cls('regular', 'MAIN', true)), { source: 'OPD', stocked: false });
+  assert.deepEqual(Calc.stockDecision({ source: 'MAIN' }, cls('opd', 'OPD')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('expensive', 'MAIN')), { source: 'MAIN', stocked: false });
+  assert.deepEqual(Calc.stockDecision({ min_par: 2 }, cls('expensive', 'MAIN')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({ par_override: 0 }, cls('expensive', 'UNKNOWN')), { source: 'UNKNOWN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('regular', 'UNKNOWN', true)), { source: 'UNKNOWN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('rare', 'UNKNOWN', false)), { source: 'UNKNOWN', stocked: false });
+});

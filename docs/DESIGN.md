@@ -96,11 +96,11 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `request_name` | Vitamin B complex | optional, name to print on the requisition; blank = `hosxp_name` |
 | `pack_size` | 100 | `unit`s per pack as main storage issues it (box of 100). Used only for the 1-pack rule (§5.2); quantities are not rounded to packs |
 | `pack_note` | issue slip 11 Nov 2026 | where the pack size came from |
-| `source` | MAIN | `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional). Suggested by recompute, pharmacist can override |
+| `source` | MAIN | pharmacist's choice: `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional) / blank = follow `source_calc` |
 | `item_code` | | main storage's item code (หมายเลขพัสดุ) if one exists (§9) |
 | `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
-| `stocked` | TRUE | counted and ordered from main storage. FALSE = OPD drug, or kept for matching only |
-| `critical` | TRUE | HAD / emergency-box items |
+| `stocked` | TRUE | counted and ordered from main storage. Written by recompute from `source`, the rule and `critical` (§6); change `source` rather than this column |
+| `critical` | TRUE | HAD / emergency-box items. Ticked on import when the name has the `HAD` tag; the pharmacist may change it |
 | `min_par` | 10 | floor for par (e.g. emergency-box quantity) |
 | `par_override` | | pharmacist's manual par; wins when set |
 | `location` | ตู้เก็บยา | ตู้เก็บยา / ชั้นวางยา / ลิ้นชักยา |
@@ -250,9 +250,18 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 
 ### Quarterly (admin, Sheet UI)
 1. Export the HOSxP daily IPD dispensing report (same columns as now: `order_date, drug_name, strength, drug_unit, total_quantity, unit_price, total_price`) and paste it into **Import**.
-2. Menu **IPD › นำเข้าข้อมูลการใช้ยา**: parse `order_date` (d/m/yyyy, C.E.), match or create **Drugs** rows, append **UsageDaily** (replacing any overlapping dates), clear **Import**. New drugs arrive as `stocked = FALSE` with `use_freq` filled in.
-3. Menu **IPD › คำนวณยอดที่ควรมีใหม่**: writes `use_freq`, `source_calc`, `par_calc`, `par_updated`. Drugs with `source_calc = MAIN` are suggested as `stocked`; drugs with a blank `pack_size` are listed for the pharmacist to fill in.
-4. Pharmacist reviews `pack_size`, `source`, `stocked`, `critical`, `min_par` and `location` in **Drugs**. Placeholder rows such as `YA....` (unit `.`) stay unstocked.
+2. Menu **IPD › นำเข้าข้อมูลการใช้ยา** (`Import.importUsage`):
+   - Checks every row first: `order_date` as d/m/yyyy text (C.E. or B.E.) or a Sheet date, quantity a number, no date after today. Any error aborts the whole import with the row numbers, and nothing is written.
+   - Rejects a column that Sheets converted only partly (some cells dates, others text with a day over 12): the sign of a month/day locale reading 5/11 as 11 May. The fix is to format column A as plain text and paste again.
+   - Sums same-day rows, drops zero quantities, matches **Drugs** by `hosxp_name + strength + unit`, and creates new drugs with `critical` ticked when the name has the `HAD` tag. Updates `unit_price` to the latest price.
+   - Replaces **UsageDaily** rows within the imported date range, clears **Import** (header kept), and runs step 3.
+3. Menu **IPD › คำนวณยอดที่ควรมีใหม่** (`Import.recompute`): uses the last `history_days` of **UsageDaily** up to the latest usage date (not before the first one), and writes `use_freq`, `source_calc`, `stocked`, `par_calc`, `par_updated`. The summary lists drugs with no `pack_size`, expensive drugs needing a `min_par`, and drugs whose `source` differs from the rule.
+4. Pharmacist reviews `pack_size`, `source`, `critical`, `min_par`, `par_override` and `location` in **Drugs**, then reruns step 3. Placeholder rows such as `YA....` (unit `.`) stay unstocked.
+
+**`stocked` is written by recompute** (`Calc.stockDecision`); the pharmacist steers it through `source`:
+- `source` blank: the 1-pack rule decides (`source_calc`); with no `pack_size`, the use-frequency fallback.
+- `source` = `OPD` → not stocked; `MAIN` → stocked, whatever the rule says.
+- `critical` drugs are always stocked. Expensive, infrequent drugs are stocked only once they have a `min_par` or `par_override` (or `source = MAIN`).
 
 ### Round every 2 weeks (web app)
 1. **Count** (technician, phone). Opens the current round, created automatically for the cycle. Only `MAIN` drugs are counted. Drugs are grouped by location in `shelf_order`, with name, strength, unit and a critical badge, and one number input in the drug's request unit (tablets, ampoules, or bottles for per-ml liquids; decimals allowed for an opened bottle). Each row autosaves, so a half-finished count survives interruptions. A progress bar shows "counted 87/210". **ส่งให้เภสัชตรวจ** sets status `REVIEW`.

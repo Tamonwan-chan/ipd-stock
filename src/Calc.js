@@ -237,7 +237,9 @@ var Calc = (function () {
     var s = settingsWithDefaults(settings);
     if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder', source: null };
     // HAD drugs must never run out: always main storage (open question in issue #3).
-    if (isCriticalName(d.name)) return { stocked: true, critical: true, tier: 'critical', source: 'MAIN' };
+    // d.critical (the Drugs column) wins when given; otherwise the HAD tag in the name decides.
+    var critical = d.critical === undefined || d.critical === null || d.critical === '' ? isCriticalName(d.name) : !!d.critical;
+    if (critical) return { stocked: true, critical: true, tier: 'critical', source: 'MAIN' };
     var source = supplySource(stats.cycleMax, d.pack_size, s);
     var value = (stats.total || 0) * (toNumber(d.unit_price) || 0);
     if (value >= s.expensive_value && stats.useFreq < s.expensive_max_freq) {
@@ -248,6 +250,30 @@ var Calc = (function () {
     // Pack size unknown: fall back to use frequency until it is filled in.
     if (stats.useFreq >= s.min_use_freq - EPS) return { stocked: true, critical: false, tier: 'regular', source: source };
     return { stocked: false, critical: false, tier: 'rare', source: source };
+  }
+
+  /**
+   * Final stock decision for one drug: the pharmacist's `source` wins over the 1-pack rule.
+   *   source 'OPD'                      → not stocked
+   *   source 'MAIN' set by pharmacist   → stocked
+   *   rule says MAIN                    → stocked, except expensive drugs without a manual par
+   *   pack size unknown                 → classifyDrug's use-frequency fallback (expensive: manual par only)
+   * Critical drugs are always stocked; placeholders never.
+   * @param {{source?:string, min_par?:*, par_override?:*}} drug  Drugs row
+   * @param {{stocked:boolean, critical:boolean, tier:string, source:string|null}} cls  classifyDrug result
+   * @return {{source:string|null, stocked:boolean}}  source = the one in effect
+   */
+  function stockDecision(drug, cls) {
+    if (cls.tier === 'placeholder') return { source: null, stocked: false };
+    if (cls.critical) return { source: 'MAIN', stocked: true };
+    var manual = norm(drug.source).toUpperCase();
+    var source = manual === 'MAIN' || manual === 'OPD' ? manual : cls.source;
+    var manualPar = (toNumber(drug.min_par) || 0) > 0 || toNumber(drug.par_override) !== null;
+    if (source === 'OPD') return { source: source, stocked: false };
+    if (manual === 'MAIN') return { source: source, stocked: true };
+    if (cls.tier === 'expensive') return { source: source, stocked: manualPar };
+    if (source === 'MAIN') return { source: source, stocked: true };
+    return { source: source, stocked: cls.stocked };
   }
 
   // ------------------------------------------------------------------ order
@@ -371,6 +397,7 @@ var Calc = (function () {
     calcPar: calcPar,
     supplySource: supplySource,
     classifyDrug: classifyDrug,
+    stockDecision: stockDecision,
     suggestOrder: suggestOrder,
     lineFlags: lineFlags,
     opdSuggestion: opdSuggestion,
