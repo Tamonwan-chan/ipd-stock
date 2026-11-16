@@ -98,10 +98,22 @@ var Import = (function () {
    *           usage:{removed,added,total}, recompute:Object}}
    */
   function importUsage(ss, opts) {
+    var raw = db_().readTable('Import', ss);
+    if (!raw.length) return { ok: false, errors: ['แท็บ Import ว่าง: วางข้อมูลจาก HOSxP ก่อน'] };
+    var r = importRows(raw, ss, opts);
+    if (r.ok) db_().rewriteTable('Import', [], ss);
+    return r;
+  }
+
+  /**
+   * Import HOSxP rows given as objects {_row, order_date, drug_name, strength, drug_unit,
+   * total_quantity, unit_price} (from the Import tab, or a file read by the web page).
+   * Same result as importUsage; nothing is written if any row has an error.
+   */
+  function importRows(raw, ss, opts) {
     var C = calc_(), D = db_();
     var today = (opts && opts.today) || D.fromCell(new Date(), 'date');
-    var raw = D.readTable('Import', ss);
-    if (!raw.length) return { ok: false, errors: ['แท็บ Import ว่าง: วางข้อมูลจาก HOSxP ก่อน'] };
+    if (!raw.length) return { ok: false, errors: ['ไม่มีข้อมูล'] };
 
     var parsed = parseImport(raw, today);
     if (parsed.errors.length) {
@@ -146,7 +158,6 @@ var Import = (function () {
     var usage = D.replaceUsage(parsed.usage.map(function (u) {
       return { date: u.date, drug_id: byKey[u.key].drug_id, qty: u.qty };
     }), ss);
-    D.rewriteTable('Import', [], ss);
 
     return {
       ok: true, errors: [], rows: raw.length - parsed.skipped, from: parsed.from, to: parsed.to,
@@ -169,6 +180,7 @@ var Import = (function () {
   function recompute(ss, opts) {
     var C = calc_(), D = db_();
     var today = (opts && opts.today) || D.fromCell(new Date(), 'date');
+    D.ensureSchema(ss); // a sheet set up by an older version may lack newer columns
     var s = D.settings(ss);
     var drugs = D.readTable('Drugs', ss);
     var usage = D.readTable('UsageDaily', ss);
@@ -202,6 +214,7 @@ var Import = (function () {
       var par = C.calcPar(series, { critical: cls.critical }, s);
 
       d.use_freq = Math.round(st.useFreq * 1000) / 1000;
+      d.mean_daily = Math.round(st.mean * 1000) / 1000;
       d.source_calc = cls.source || '';
       d.stocked = dec.stocked;
       d.par_calc = par.parCalc;
@@ -218,7 +231,12 @@ var Import = (function () {
       }
     });
 
-    D.updateFields('Drugs', drugs, ['use_freq', 'source_calc', 'stocked', 'par_calc', 'par_updated'], ss);
+    D.updateFields('Drugs', drugs, ['use_freq', 'mean_daily', 'source_calc', 'stocked', 'par_calc', 'par_updated'], ss);
+    // Remember the window for the web page (Settings rows outside Calc.DEFAULTS are ignored by Calc).
+    D.upsert('Settings', [
+      { key: 'usage_from', value: from, note: 'ช่วงข้อมูลที่ใช้คำนวณล่าสุด (เขียนโดยโปรแกรม)' },
+      { key: 'usage_to', value: to, note: 'ช่วงข้อมูลที่ใช้คำนวณล่าสุด (เขียนโดยโปรแกรม)' }
+    ], ss);
     return report;
   }
 
@@ -226,6 +244,7 @@ var Import = (function () {
     importDate: importDate,
     parseImport: parseImport,
     importUsage: importUsage,
+    importRows: importRows,
     recompute: recompute
   };
 })();

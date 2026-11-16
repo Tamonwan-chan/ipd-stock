@@ -210,6 +210,20 @@ var Calc = (function () {
   }
 
   /**
+   * Par in effect for a Drugs row, from the stored par_calc (same rules as calcPar):
+   * par_override if set, else max(par_calc, min_par).
+   * @return {{par:number, source:string}}  source: 'override' | 'min_par' | 'calc' | 'none'
+   */
+  function parFromStored(drug) {
+    var override = toNumber(drug.par_override);
+    if (override !== null) return { par: override, source: 'override' };
+    var calc = toNumber(drug.par_calc) || 0;
+    var minPar = toNumber(drug.min_par) || 0;
+    if (minPar > calc) return { par: minPar, source: 'min_par' };
+    return { par: calc, source: calc > 0 ? 'calc' : 'none' };
+  }
+
+  /**
    * Where a drug should come from (DESIGN §5.2, issue #3):
    *   busiest cycle in the history ≥ main_pack_share (80%) of a pack → 'MAIN' (main storage, par-based)
    *   otherwise                                                       → 'OPD'  (fetched from OPD, optional)
@@ -395,6 +409,7 @@ var Calc = (function () {
     drugStats: drugStats,
     windowDays: windowDays,
     calcPar: calcPar,
+    parFromStored: parFromStored,
     supplySource: supplySource,
     classifyDrug: classifyDrug,
     stockDecision: stockDecision,

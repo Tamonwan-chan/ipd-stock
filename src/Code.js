@@ -1,11 +1,33 @@
 /**
- * Code.js — Sheet menu for the admin. Web app routing (doGet) comes later.
+ * Code.js — web app entry (doGet) and the Sheet menu for the admin.
  * Menu and messages are in Thai (read by IPD staff).
  */
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('ui/App')
+    .evaluate()
+    .setTitle('สต็อกยา IPD')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+/** Used by ui/App.html: <?!= include('ui/Styles') ?> */
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
+
+/** Show the web app link (Sheet menu). */
+function showWebAppLink() {
+  var url = ScriptApp.getService().getUrl();
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('ลิงก์หน้าเว็บ', url || 'ยังไม่ได้ deploy เป็น web app (Deploy › New deployment › Web app)', ui.ButtonSet.OK);
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('IPD')
+    .addItem('เปิดหน้าเว็บ (ลิงก์)', 'showWebAppLink')
+    .addSeparator()
     .addItem('นำเข้าข้อมูลการใช้ยา (จากแท็บ Import)', 'importUsage')
     .addItem('คำนวณยอดที่ควรมีใหม่', 'recomputePar')
     .addSeparator()

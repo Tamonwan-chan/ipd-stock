@@ -43,14 +43,16 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 │  Calc.js   pure functions: mean/SD, worst window, par, order (Node-tested)
 │  Schema.js tabs, columns and column types (plain data)                       │
 │  Db.js     read/write sheets as arrays of objects, LockService (Node-tested) │
-│  Import.js HOSxP CSV → UsageDaily, new drugs → Drugs, recompute par         │
-│  Rounds.js round lifecycle                                                   │
-│  Code.js   onOpen menu (admin) + doGet web app routing                       │
+│  Import.js HOSxP rows → UsageDaily, new drugs → Drugs, recompute par        │
+│  Api.js    web app server calls: state, import file, rounds, save lines      │
+│  Code.js   onOpen menu (admin) + doGet web app                               │
+│  ui/       App.html (page), Styles.html, Client.html (browser JS)            │
 └────────────┬───────────────────────────┬─────────────────────────────────────┘
-     Sheet menu (admin)           Web app (HtmlService)
-     - import usage               - /count   technician, phone
-     - recompute par              - /review  pharmacist
-     - edit drug list             - /print   main-storage form + OPD list
+     Sheet menu (admin)           Web app (HtmlService), one page, four tabs
+     - import usage (paste)       - 1 import: drag a HOSxP file (.xlsx/.xls/.csv)
+     - recompute par              - 2 count: on-hand → suggested qty, autosave
+     - create tabs                - 3 main-storage form: print / CSV / copy
+                                  - 4 OPD list: tick, print / copy
 ```
 
 - **Container-bound script** on the existing private "IPD Stock" spreadsheet (which already holds the HOSxP export): simplest permissions, custom menu for free, no IDs in code.
@@ -263,7 +265,20 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 - `source` = `OPD` → not stocked; `MAIN` → stocked, whatever the rule says.
 - `critical` drugs are always stocked. Expensive, infrequent drugs are stocked only once they have a `min_par` or `par_override` (or `source = MAIN`).
 
-### Round every 2 weeks (web app)
+### Web app (v1, 16 Nov 2026)
+
+One page (`ui/App.html`) with four tabs:
+
+1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
+2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location; typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
+3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
+4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = one cycle of average use; tick lines, print or copy. Ticks are remembered in the browser only.
+
+The round review step (status `REVIEW`) is folded into the same screen for now: the pharmacist edits `เบิกจริง` and approves.
+
+Deployment: `clasp push`, then `clasp update-deployment <deploymentId>` to publish to the same URL (`clasp create-deployment` the first time). The manifest runs the app as the owner with access limited to the owner (`MYSELF`); widen `access` when staff start using it (§7).
+
+### Round every 2 weeks (web app, original plan)
 1. **Count** (technician, phone). Opens the current round, created automatically for the cycle. Only `MAIN` drugs are counted. Drugs are grouped by location in `shelf_order`, with name, strength, unit and a critical badge, and one number input in the drug's request unit (tablets, ampoules, or bottles for per-ml liquids; decimals allowed for an opened bottle). Each row autosaves, so a half-finished count survives interruptions. A progress bar shows "counted 87/210". **ส่งให้เภสัชตรวจ** sets status `REVIEW`.
 2. **Review** (pharmacist). Flagged lines first, rest collapsed. `final_qty` is editable and requires a short reason when changed. **อนุมัติ** freezes the round (`APPROVED`).
 3. **Output: main-storage form.** Lines with `final_qty > 0` in the column order of ใบเบิกหรือใบส่งคืน: ลำดับ / หมายเลขพัสดุ / รายการ / หน่วยนับ / คงเหลือจากครั้งที่แล้ว (on-hand from the count) / จำนวนเบิกใหม่. จ่ายหรือรับคืน and the price columns are left for main storage. Printable A4 plus **คัดลอก** (tab-separated).
@@ -283,9 +298,9 @@ Status flow: `COUNTING → REVIEW → APPROVED`. The pharmacist can send a round
 ```
 src/                 Apps Script project root (clasp rootDir)
   appsscript.json          time zone Asia/Bangkok, V8
-  Code.js  Calc.js  Schema.js  Db.js  Import.js  Rounds.js
-  ui/ Count.html  Review.html  Output.html  Styles.html
-test/                node --test: calc.test.js, db.test.js (+ fake-spreadsheet.js)
+  Code.js  Calc.js  Schema.js  Db.js  Import.js  Api.js
+  ui/ App.html  Styles.html  Client.html
+test/                node --test: calc, db, import, api (+ fake-spreadsheet.js)
 tools/backtest.js    replays a HOSxP export through Calc.js (aggregates only)
 tools/pack-rule.js   applies the 1-pack rule; per-drug report goes to data/raw/ only
 docs/                PRD, DESIGN

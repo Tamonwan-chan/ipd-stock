@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>สต็อกยา IPD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <?!= include('ui/Styles') ?>
+</head>
+<body>
+  <header class="app-header">
+    <h1>สต็อกยา IPD</h1>
+    <div id="hdr-status" class="muted small">กำลังโหลด…</div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="import">1. นำเข้าข้อมูลการใช้ยา</button>
+    <button role="tab" data-tab="count">2. นับยาและคำนวณยอดเบิก</button>
+    <button role="tab" data-tab="form">3. ใบเบิก (คลัง)</button>
+    <button role="tab" data-tab="opd">4. ขอจาก OPD</button>
+  </nav>
+
+  <main>
+    <!-- 1. Import -->
+    <section id="tab-import" class="tab" hidden>
+      <div class="card">
+        <h2>นำเข้าข้อมูลการใช้ยาจาก HOSxP</h2>
+        <p class="muted small">ไฟล์รายงานการจ่ายยาผู้ป่วยในรายวัน (.xlsx, .xls หรือ .csv) ที่มีหัวคอลัมน์
+          order_date, drug_name, strength, drug_unit, total_quantity, unit_price
+          ถ้านำเข้าช่วงวันที่ที่มีอยู่แล้ว ข้อมูลวันนั้นจะถูกแทนที่ ไม่นับซ้ำ</p>
+        <label id="drop" class="drop">
+          <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+          <div class="drop-main">ลากไฟล์มาวางที่นี่</div>
+          <div class="muted">หรือคลิกเพื่อเลือกไฟล์</div>
+        </label>
+        <div id="import-preview"></div>
+        <div id="import-result"></div>
+      </div>
+      <div class="card" id="data-status"></div>
+    </section>
+
+    <!-- 2. Count -->
+    <section id="tab-count" class="tab" hidden>
+      <div id="count-body"></div>
+    </section>
+
+    <!-- 3. Main-storage form -->
+    <section id="tab-form" class="tab" hidden>
+      <div class="card no-print">
+        <h2>ใบเบิกหรือใบส่งคืน (เบิกจากคลัง)</h2>
+        <div class="row small">
+          <label>เล่มที่ <input type="text" id="fh-book" size="6"></label>
+          <label>เลขที่ <input type="text" id="fh-no" size="8"></label>
+          <label>จาก <input type="text" id="fh-from" size="22"></label>
+          <label>ถึง <input type="text" id="fh-to" size="14"></label>
+          <label>วันที่ <input type="text" id="fh-date" size="14"></label>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btn-print-form">พิมพ์ใบเบิก</button>
+          <button class="btn" id="btn-csv-form">ดาวน์โหลด Excel (.csv)</button>
+          <button class="btn" id="btn-copy-form">คัดลอกรายการ</button>
+          <span id="form-summary" class="muted small"></span>
+        </div>
+      </div>
+      <div id="form-pages" class="paper-wrap"></div>
+    </section>
+
+    <!-- 4. OPD -->
+    <section id="tab-opd" class="tab" hidden>
+      <div class="card no-print">
+        <h2>รายการขอยาจากห้องยา OPD</h2>
+        <p class="muted small">ยาที่ช่วง 2 สัปดาห์ที่ใช้มากที่สุดไม่ถึง 80% ของ 1 แพ็ค ให้ไปขอจาก OPD เมื่อต้องการ
+          เลือกเฉพาะรายการที่จะขอ จำนวนที่แนะนำ = ใช้เฉลี่ยใน 1 รอบ (แก้ได้)</p>
+        <div class="row">
+          <input type="search" id="opd-search" placeholder="ค้นหายา">
+          <button class="btn" id="btn-opd-clear">ล้างที่เลือก</button>
+          <span class="spacer"></span>
+          <button class="btn primary" id="btn-print-opd">พิมพ์รายการ</button>
+          <button class="btn" id="btn-copy-opd">คัดลอก</button>
+        </div>
+        <div id="opd-list"></div>
+      </div>
+      <div id="opd-print"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <?!= include('ui/Client') ?>
+</body>
+</html>

@@ -12,10 +12,11 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 
 ## Status
 
-- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects), `src/Import.js` (HOSxP paste → Drugs/UsageDaily, recompute), `src/Code.js` (IPD menu), all tested; `tools/backtest.js`, `tools/pack-rule.js`.
+- Done: PRD, design v0.4 (2-week cycle, 1-pack rule, main-storage form), `src/Calc.js` (pure calculation functions), `src/Schema.js` + `src/Db.js` (Sheet tabs, read/write as objects), `src/Import.js` (HOSxP rows → Drugs/UsageDaily, recompute), `src/Api.js` + `src/ui/` (web app: import file, count, main-storage form, OPD list), `src/Code.js` (doGet + IPD menu), all server code tested; `tools/backtest.js`, `tools/pack-rule.js`.
 - Deployed with `clasp push` to the Apps Script project bound to the private "IPD Stock" Sheet. `.clasp.json` (script ID) is local only; on another PC, recreate it from the script ID in the Apps Script editor (Project Settings), with `"rootDir": "src"`.
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
-- Next: the count/review/output web app (`Rounds.js` + HtmlService pages). See DESIGN §9 for questions still open with IPD staff.
+- Web app v1 deployed (owner-only access). The browser code in `src/ui/Client.html` has no automated tests beyond a parse check; try changes in the deployed page.
+- Next: feedback from IPD staff on the web app; widen web app access (DESIGN §7). See DESIGN §9 for questions still open with IPD staff.
 
 ## Commands
 
@@ -24,6 +25,7 @@ npm test                                   # unit tests (node --test), no depend
 npm run backtest -- data/raw/<export>.csv --split 2026-10-01 [--z 1.65] [--delay 3] [--cycle 14] [--packs data/raw/pack-sizes.csv]
 npm run pack-rule -- data/raw/<export>.csv --packs data/raw/pack-sizes.csv --out data/raw/pack-rule-report.csv
 clasp push                                 # upload src/ to the bound Apps Script project (needs .clasp.json)
+clasp update-deployment <deploymentId>     # publish the pushed code to the web app URL (ID: clasp list-deployments)
 ```
 
 clasp 3: to bind a script to an existing Sheet, use `clasp create-script --parentId <sheetId> --rootDir src` **without** `--type`. With `--type sheets` it ignores `--parentId` and creates a new, empty spreadsheet. `create-script` also overwrites `src/appsscript.json` with a default (New York time zone): restore it with `git checkout -- src/appsscript.json` before pushing.

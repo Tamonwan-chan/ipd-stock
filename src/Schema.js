@@ -47,6 +47,7 @@ var Schema = (function () {
         ['location', 'string'],
         ['shelf_order', 'number'],
         ['use_freq', 'number'],
+        ['mean_daily', 'number'],
         ['source_calc', 'string'],
         ['par_calc', 'number'],
         ['par_updated', 'date']
