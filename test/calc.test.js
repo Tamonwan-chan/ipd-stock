@@ -205,11 +205,16 @@ test('classifyDrug', () => {
     { stocked: false, critical: false, tier: 'opd', source: 'OPD' });
 });
 
-test('opdSuggestion: one cycle of use, at least 1 when used', () => {
-  assert.equal(Calc.opdSuggestion(0.5, 1, {}), 7);
+test('opdSuggestion: one OPD cycle (a month) of use, at least 1 when used', () => {
+  assert.equal(Calc.opdSuggestion(0.5, 1, {}), 15);
   assert.equal(Calc.opdSuggestion(0.01, 1, {}), 1);
   assert.equal(Calc.opdSuggestion(0, 1, {}), 0);
-  assert.equal(Calc.opdSuggestion(30, 240, {}), 2); // 420 ml → 2 bottles of 240 ml
+  assert.equal(Calc.opdSuggestion(30, 240, {}), 4); // 900 ml → 4 bottles of 240 ml
+});
+
+test('opdSuggestion: follows opd_cycle_days, not the main-storage cycle_days', () => {
+  assert.equal(Calc.opdSuggestion(0.5, 1, { opd_cycle_days: 28, cycle_days: 7 }), 14);
+  assert.equal(Calc.opdSuggestion(0.5, 1, { cycle_days: 7 }), 15);
 });
 
 test('mainFormLine and mainFormTsv: form column order, units', () => {

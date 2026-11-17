@@ -22,6 +22,7 @@ var Calc = (function () {
     z: 1.65,                // safety factor, normal drugs
     critical_z: 2.33,       // safety factor, critical drugs
     min_use_freq: 1 / 7,    // used on at least this share of days -> main storage (stocked), else OPD
+    opd_cycle_days: 30,     // days between OPD requests (once a month); sizes the OPD suggestion
     expensive_value: 5000,  // THB of usage over the history window ...
     expensive_max_freq: 0.5 // ... combined with use on fewer than this share of days
   };
@@ -356,14 +357,14 @@ var Calc = (function () {
   }
 
   /**
-   * Suggested quantity for an OPD drug: expected use over one cycle, in request units.
-   * Staff decide per line whether to request it at all (issue #3).
+   * Suggested quantity for an OPD drug: expected use over one OPD cycle (opd_cycle_days,
+   * default a month), in request units. Staff decide per line whether to request it at all (issue #3).
    */
   function opdSuggestion(meanDaily, requestFactor, settings) {
     var s = settingsWithDefaults(settings);
     var f = toNumber(requestFactor) || 1;
     var mean = meanDaily || 0;
-    return mean > 0 ? Math.max(1, ceilSafe(mean * s.cycle_days / f)) : 0;
+    return mean > 0 ? Math.max(1, ceilSafe(mean * s.opd_cycle_days / f)) : 0;
   }
 
   // ----------------------------------------------------------------- output

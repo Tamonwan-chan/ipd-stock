@@ -40,7 +40,8 @@ test('state: drugs with par and source, usage window, no round yet; JSON only', 
   const d = Object.fromEntries(st.drugs.map(x => [x.hosxp_name, x]));
   assert.deepEqual([d['Busy tab'].source, d['Busy tab'].stocked], ['MAIN', true]);
   assert.deepEqual([d['Slow tab'].source, d['Slow tab'].stocked], ['OPD', false]);
-  assert.equal(d['Slow tab'].opd_suggestion, 7); // 14 used in 28 days → 7 per 14-day cycle
+  assert.equal(d['Slow tab'].opd_suggestion, 15); // 14 used in 28 days → 15 per 30-day OPD cycle
+  assert.equal(st.settings.opd_cycle_days, 30);
   assert.equal(d['KCl inj *HAD*'].critical, true);
   assert.ok(d['Busy tab'].par >= 160); // 10/day × 16 days, steady
   assert.equal(st.settings.window_days, 16);

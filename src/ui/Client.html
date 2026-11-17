@@ -640,7 +640,8 @@
       renderOpdPrint();
       return;
     }
-    var cyc = S.state.settings.cycle_days;
+    var cyc = S.state.settings.opd_cycle_days;
+    $('opd-cycle-days').textContent = cyc;
     var rows = list.filter(function (d) { return !q || (d.name + ' ' + d.strength).toLowerCase().indexOf(q) >= 0; }).map(function (d) {
       var sel = !!S.opdSel[d.drug_id];
       return '<tr><td><input type="checkbox" data-opd="' + esc(d.drug_id) + '"' + (sel ? ' checked' : '') + ' aria-label="เลือก"></td>' +
@@ -650,7 +651,7 @@
         esc(S.opdQty[d.drug_id] === undefined ? '' : S.opdQty[d.drug_id]) + '" placeholder="' + esc(d.opd_suggestion) + '"></td></tr>';
     }).join('');
     $('opd-list').innerHTML = '<div class="table-wrap"><table class="plain"><thead><tr><th></th><th>ยา</th><th>หน่วย</th>' +
-      '<th class="num">ใช้เฉลี่ย/รอบ</th><th class="num">จะขอ</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      '<th class="num">ใช้เฉลี่ย/' + esc(cyc) + ' วัน</th><th class="num">จะขอ</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
     Array.prototype.forEach.call($('opd-list').querySelectorAll('[data-opd]'), function (cb) {
       cb.onchange = function () {
         var id = this.getAttribute('data-opd');

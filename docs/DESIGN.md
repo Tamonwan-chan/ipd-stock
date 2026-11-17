@@ -14,7 +14,7 @@ From PRD section 2, nothing more:
 1. Compute a **par level** (ยอดที่ควรมี) per drug from real usage.
 2. At each count (every 2 weeks), take on-hand quantities and compute **how much to order**.
 3. Produce a **main-storage requisition** laid out like the paper form ใบเบิกหรือใบส่งคืน: drug name, unit, on-hand, quantity in dispensing units (e.g. `Vitamin B complex 1500 เม็ด`) (§6).
-4. Produce a separate, optional **OPD list** for drugs used less than weekly (§5.2).
+4. Produce a separate, optional, monthly **OPD list** for drugs used less than weekly (§5.2).
 
 Out of scope for round 1: automatic stock deduction, live HIS integration, expiry tracking, receiving/check-in records.
 
@@ -28,7 +28,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | IPD requests from main storage every 2 weeks, independent of OPD's weekly cycle (16 Nov) | Demand window = count day through next delivery = 16 days (§5). Count and delivery days still to confirm |
 | 11 HAD injectables must never run out (Q4) | Per-drug `critical` flag → par from the worst observed window + minimum par |
 | Main storage's form has a unit column (หน่วยนับ); IPD requests in units, and pack sizes change too often to track (16 Nov) | No box rounding and no pack sizes; output in units (whole bottles for liquids dispensed per ml) |
-| Low-use drugs are fetched from OPD, not requested from main storage (16 Nov) | Use frequency decides main storage vs OPD (§5.2) |
+| Low-use drugs are fetched from OPD, not requested from main storage (16 Nov), once a month (17 Nov) | Use frequency decides main storage vs OPD; OPD suggestion = a month of use (§5.2) |
 | HOSxP export is daily, one row per drug per day, no patient columns | Store daily usage in the Sheet; the daily SD and the worst W-day window need daily data |
 | Repo is public | No spreadsheet IDs, script IDs or hospital data in git |
 
@@ -80,6 +80,7 @@ Each column has a type. Text columns get the plain-text format so Sheets doesn't
 | `z` | 1.65 | safety factor, normal drugs (nominal 95%; ~93% achieved on real data) |
 | `critical_z` | 2.33 | safety factor, `critical` drugs (nominal 99%) |
 | `min_use_freq` | 0.143 | drugs used on at least this share of days (1 in 7 ≈ weekly) → main storage, stocked; rarer → OPD (§5.2) |
+| `opd_cycle_days` | 30 | days between OPD requests (once a month); sizes the OPD suggestion (§5.2) |
 | `expensive_value` | 5000 | THB of usage over the history window that, together with … |
 | `expensive_max_freq` | 0.5 | … use on fewer than this share of days, puts a drug in the pharmacist-set tier (§5.2) |
 
@@ -141,7 +142,7 @@ par            = par_override  if set,  else max(par_calc, min_par)
 on_hand        = counted_request_units × request_factor            (decimals allowed: half a bottle = 0.5)
 suggested_qty  = ceil( max(0, par − on_hand) / request_factor )    in request units
 main form line = ลำดับ | item_code | request_name | request_unit | on_hand | final_qty
-OPD suggestion = ceil( d̄·cycle_days / request_factor ), at least 1 if used      (staff choose whether to request)
+OPD suggestion = ceil( d̄·opd_cycle_days / request_factor ), at least 1 if used  (staff choose whether to request)
 
 T              = lead_days + 1 + delay_days                        (default 2 days: count → this round's delivery)
 min_calc       = ceil( d̄·T + z·σ·√T )                             critical drugs also: min ≥ largest T-day demand seen
@@ -192,7 +193,7 @@ Caveats: one month of out-of-sample data; 3 months can't show seasonality; "shor
 
 ### 5.2 What to stock: main storage or OPD
 
-**Use-frequency rule.** A drug is stocked and requested from main storage when it was used on at least `min_use_freq` of the days in the history window (default 1/7: about weekly). Rarer drugs are fetched from OPD when staff need them (suggested quantity = one cycle of average use).
+**Use-frequency rule.** A drug is stocked and requested from main storage when it was used on at least `min_use_freq` of the days in the history window (default 1/7: about weekly). Rarer drugs are fetched from OPD: IPD requests them once a month (17 Nov 2026), suggested quantity = average use over `opd_cycle_days` (30).
 
 ```
 use_freq ≥ min_use_freq   →  source = MAIN  (counted, par-based, on the main-storage form)
@@ -273,7 +274,7 @@ One page (`ui/App.html`) with five tabs:
 1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
 2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
 3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
-4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = one cycle of average use; tick lines, print or copy. Ticks are remembered in the browser only.
+4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = average use over `opd_cycle_days` (a month); tick lines, print or copy. Ticks are remembered in the browser only.
 5. **ป้ายสูงสุด/ต่ำสุด**: printable A4 list of every stocked drug by location with max and min in request units (rounded up), plus CSV. Reprint after each import, since both numbers change.
 
 The round review step (status `REVIEW`) is folded into the same screen for now: the pharmacist edits `เบิกจริง` and approves.
@@ -284,7 +285,7 @@ Deployment: `clasp push`, then `clasp update-deployment <deploymentId>` to publi
 1. **Count** (technician, phone). Opens the current round, created automatically for the cycle. Only `MAIN` drugs are counted. Drugs are grouped by location in `shelf_order`, with name, strength, unit and a critical badge, and one number input in the drug's request unit (tablets, ampoules, or bottles for per-ml liquids; decimals allowed for an opened bottle). Each row autosaves, so a half-finished count survives interruptions. A progress bar shows "counted 87/210". **ส่งให้เภสัชตรวจ** sets status `REVIEW`.
 2. **Review** (pharmacist). Flagged lines first, rest collapsed. `final_qty` is editable and requires a short reason when changed. **อนุมัติ** freezes the round (`APPROVED`).
 3. **Output: main-storage form.** Lines with `final_qty > 0` in the column order of ใบเบิกหรือใบส่งคืน: ลำดับ / หมายเลขพัสดุ / รายการ / หน่วยนับ / คงเหลือจากครั้งที่แล้ว (on-hand from the count) / จำนวนเบิกใหม่. จ่ายหรือรับคืน and the price columns are left for main storage. Printable A4 plus **คัดลอก** (tab-separated).
-4. **Output: OPD list** (optional, any time). `OPD` drugs with the suggested quantity for one cycle; staff tick the lines they want and print or copy: ลำดับ / รายการ / จำนวน / หน่วย / หมายเหตุ = IPD.
+4. **Output: OPD list** (monthly). `OPD` drugs with the suggested quantity for one OPD cycle (`opd_cycle_days`); staff tick the lines they want and print or copy: ลำดับ / รายการ / จำนวน / หน่วย / หมายเหตุ = IPD.
 
 Status flow: `COUNTING → REVIEW → APPROVED`. The pharmacist can send a round back to `COUNTING`. Approved rounds are read-only.
 
