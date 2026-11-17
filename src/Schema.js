@@ -117,7 +117,7 @@ var Schema = (function () {
   /** Notes written next to each setting (read by the admin in the Sheet, so in Thai). */
   var SETTING_NOTES = {
     cycle_days: 'จำนวนวันระหว่างรอบเบิกจากคลัง (14 = ทุก 2 สัปดาห์)',
-    lead_days: 'วันนับยา → วันที่ยามาถึง (รอยืนยันกับ IPD)',
+    lead_days: 'วันนับยา → วันที่ยามาถึง (นับวันอังคารเช้า ยามาถึงวันพุธบ่าย = 1)',
     delay_days: 'วันเผื่อยามาช้า บวกเข้าช่วงที่ต้องมียาพอ',
     history_days: 'จำนวนวันย้อนหลังที่ใช้คำนวณยอดที่ควรมี',
     z: 'ค่าความปลอดภัย ยาทั่วไป (1.65 ≈ 95%)',

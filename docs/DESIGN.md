@@ -74,7 +74,7 @@ Each column has a type. Text columns get the plain-text format so Sheets doesn't
 | key | default | meaning |
 | :- | :- | :- |
 | `cycle_days` | 14 | days between main-storage requisitions (every 2 weeks) |
-| `lead_days` | 1 | count day → delivery day. **Pending confirmation with IPD** |
+| `lead_days` | 1 | count day → delivery day: count Tuesday morning, delivery Wednesday afternoon (IPD, 17 Nov) |
 | `delay_days` | 0 | extra days for late delivery, added to the window. **Decision needed** (§5.3) |
 | `history_days` | 90 | usage history used to compute par |
 | `z` | 1.65 | safety factor, normal drugs (nominal 95%; ~93% achieved on real data) |
@@ -228,6 +228,8 @@ Staff asked for 3–5 extra days in case of late delivery (Q5). The safety stock
 | 3 | 4.6% | 135k THB | 102k THB | 6.6% | 199k THB | 140k THB |
 | 5 | 3.5% | 154k THB | 121k THB | 4.7% | 216k THB | 157k THB |
 
+IPD staff (17 Nov): the buffer applies to **every drug**, not only critical ones, so every shelf also covers refilling the emergency boxes used on each shift. The number of days (3, 4 or 5) is still to choose.
+
 Extra days also cut shortfalls when deliveries are on time, because they add stock. Each day costs roughly 9–10k THB of extra stock on either cycle. Decide with IPD whether late deliveries happen often enough to pay for that, or whether `delay_days` applies to `critical` drugs only.
 
 These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (§5.2) are left out of the formula.
@@ -318,17 +320,21 @@ Resolved:
 - Liquids dispensed per ml are requested as whole bottles (KCl elixir: 240 ml per bottle) → `request_unit` / `request_factor`.
 - Ordering cycle: every 2 weeks, from main storage on IPD's own form (v0.4, §5.1).
 - Quantities in units on both lists; no pack sizes (they change too often). Main storage vs OPD by use frequency (§5.2).
+- Lead time: count on Tuesday morning, main storage delivers Wednesday afternoon → `lead_days = 1` (17 Nov).
+- OPD requests: once a month → `opd_cycle_days = 30` (17 Nov).
+- OPD list: IPD's current list (79 drugs) checked against Aug–Oct usage: 33 move to main storage, 4 rarely used HAD injections for the pharmacist to decide, 28 stay with OPD, 14 unused in the period (#3, 17 Nov).
+- Targets for the trial month (PRD §8): trips to OPD at most 1–2 a week (aim 0–1); requisition work at most 20–30 minutes per round.
 
 Open:
 1. **Accounts and devices.** Do the technician and pharmacist have Google accounts, and will they count on a phone? (Decides §7.)
-2. **Lead time.** Which day is the count done, and when does main storage deliver? (Sets `lead_days`.)
-3. **Delivery delay.** How often does stock arrive later than Wednesday? Is `delay_days` needed for all drugs, critical only, or none? (§5.3; being confirmed with IPD staff.)
-4. **Bottle sizes.** Per-ml drugs in HOSxP: KCl syrup (240 ml, confirmed), Berodual solution, Salbutamol solution, lidocaine 2% inj, adrenaline 1 mg/ml (1 ml = 1 ampoule), and a generic `Syrup (คิดเป็น ml)` row. Need the bottle/vial size of each.
+2. ~~Lead time~~ resolved above.
+3. **Delivery delay.** Staff want the buffer on all drugs (17 Nov). Choose `delay_days`: 3, 4 or 5 (§5.3). Staff also wrote "weekly requisition" in that answer: confirm the main-storage cycle is still every 2 weeks.
+4. **Bottle sizes.** Per-ml drugs in HOSxP: KCl syrup (240 ml, confirmed), Berodual solution, Salbutamol solution, lidocaine 2% inj, adrenaline 1 mg/ml (1 ml = 1 ampoule), and a generic `Syrup (คิดเป็น ml)` row. Need the bottle/vial size of each. Staff answers (17 Nov): `Syrup (คิดเป็น ml)` = 450 ml bottle. Lidocaine viscous "100 ml" and S.M.W "3.750 L" need checking: HOSxP already counts them per 15-ml and 120-ml bottle, so these may be main storage's issue sizes. Still missing: Berodual solution, Salbutamol solution, lidocaine 2% inj.
 5. **Multiple locations.** Is any drug kept in more than one place? If yes, counting needs one row per drug-location.
 6. **Drug code.** Can IT add HOSxP `icode` to the export? Names change and have typos; a code is a safer key.
-7. **Expensive, infrequent drugs.** Pharmacist to confirm `min_par` for the ~20 drugs listed by the recompute step (§5.2).
+7. **Expensive, infrequent drugs.** IPD pharmacist (17 Nov): keep about 5 days of use at the maximum dose per drug. Next: list each drug's maximum daily dose → `min_par`, for the pharmacist to confirm (§5.2).
 8. **Pack sizes.** 26 known so far (issue slip and requisition form). Where do the rest come from: main storage's item list? (#2)
-9. **OPD list.** IPD's current list of drugs fetched from OPD, to check against the weekly-use rule (#3).
-10. **Rule details.** HAD always main storage? Is weekly the right line between main storage and OPD? (#3, §5.2)
+9. ~~OPD list~~ resolved above. Pharmacist to confirm the 5 borderline drugs (used on exactly 14 of 92 days) and deferiprone (GPO-L-ONE: shelf stock or patient-specific).
+10. **Rule details.** HAD always main storage? 4 HAD injections on IPD's OPD list are used on 1–3 days in 3 months (calcium gluconate, dopamine, adenosine, digoxin). Is weekly the right line between main storage and OPD? (#3, §5.2)
 11. **หมายเลขพัสดุ.** Does main storage have an item code per drug? (#4)
 12. **Page layout.** The paper form has ~19 lines per sheet: number the printout's pages to match, or print one continuous list? (#4)
