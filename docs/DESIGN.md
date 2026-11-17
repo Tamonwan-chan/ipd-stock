@@ -328,7 +328,11 @@ Resolved:
 - Delivery delay: `delay_days = 5`, on every drug; main-storage cycle confirmed every 2 weeks (17 Nov).
 - HAD drugs always come from main storage (17 Nov). Only the HAD-tagged forms: digoxin injection is HAD, digoxin tablet is not.
 - OPD list after staff review (17 Nov): the 33 move to main storage except clozapine 100 mg, ibuprofen 200 mg, bisoprolol 5 mg and S.M.W (`source = OPD`); atropine injection and budesonide nasal spray also move (`source = MAIN`); the 4 HAD injections stay in main storage.
-- Per-ml rows `Berodual solution (คิดเป็น มล.…)`, `Salbutamol solution (คิดเป็น มล.)` and lidocaine 2% inj are charges only, not drug taken from stock → `source = NONE` (17 Nov).
+- Charge-only rows: nurses enter them in HOSxP to bill by the ml or unit; the drug itself comes from a bottle or vial that has its own row (or isn't IPD stock) → `source = NONE`, set by hand (17 Nov):
+  - per ml: `Berodual solution (คิดเป็น มล.พ่นยาใน รพ.)`, `Salbutamol solution (คิดเป็น มล.)(C)`, `(ยาชา) Li-docaine inj. (ต่อ มล.)(B)`;
+  - per unit: `Mixtard 30/70 (คิดเป็นยูนิต)`, `REGULAR INSULIN (RI) (คิดยูนิต)` (the vials are `Mixtard 30/70 (ขวด)` and `REGULAR INSULIN inj (RI)10ml`).
+
+  Exceptions: `KCl syr. (คิดต่อ ml.)` and `Syrup (คิดเป็น ml)` are real IPD stock with no other row, so they stay counted, requested in whole bottles (240 ml and 450 ml). No automatic rule by name: the wording varies (คิดเป็น / คิดต่อ / คิดยูนิต / ต่อ มล.) and would catch these two. The recompute summary lists every `NONE` row.
 - Issue sizes: lidocaine viscous comes from main storage in 100 ml bottles (HOSxP counts 15 ml bottles → `request_factor` 100/15); S.M.W is requested by the 3.750 L gallon (HOSxP counts 120 ml bottles → `request_factor` 31.25). `Syrup (คิดเป็น ml)`: 450 ml bottle.
 
 Open:
