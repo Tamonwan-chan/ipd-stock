@@ -255,4 +255,7 @@ test('stockDecision: pharmacist source and par win; expensive goes to OPD until 
   assert.deepEqual(Calc.stockDecision({}, cls('opd', 'OPD')), { source: 'OPD', stocked: false });
   assert.deepEqual(Calc.stockDecision({ min_par: 5 }, cls('opd', 'OPD')), { source: 'MAIN', stocked: true });
   assert.deepEqual(Calc.stockDecision({ min_par: 5, source: 'OPD' }, cls('opd', 'OPD')), { source: 'OPD', stocked: false });
+  // NONE: billing-only rows, requested from nowhere; HAD still wins
+  assert.deepEqual(Calc.stockDecision({ source: 'none', min_par: 5 }, cls('regular', 'MAIN', true)), { source: null, stocked: false });
+  assert.deepEqual(Calc.stockDecision({ source: 'NONE' }, cls('critical', 'MAIN', true, true)), { source: 'MAIN', stocked: true });
 });

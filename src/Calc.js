@@ -291,6 +291,7 @@ var Calc = (function () {
 
   /**
    * Final stock decision for one drug; the pharmacist's choices win over the rule.
+   *   source 'NONE' set by pharmacist   → neither stocked nor on the OPD list (billing-only rows)
    *   source 'OPD' set by pharmacist    → not stocked
    *   source 'MAIN' set by pharmacist   → stocked
    *   min_par or par_override set       → stocked (the pharmacist wants it on the shelf)
@@ -299,12 +300,13 @@ var Calc = (function () {
    * Critical drugs are always stocked; placeholders never.
    * @param {{source?:string, min_par?:*, par_override?:*}} drug  Drugs row
    * @param {{stocked:boolean, critical:boolean, tier:string, source:string|null}} cls  classifyDrug result
-   * @return {{source:string|null, stocked:boolean}}  source = the one in effect
+   * @return {{source:string|null, stocked:boolean}}  source = the one in effect (null: not requested)
    */
   function stockDecision(drug, cls) {
     if (cls.tier === 'placeholder') return { source: null, stocked: false };
     if (cls.critical) return { source: 'MAIN', stocked: true };
     var manual = norm(drug.source).toUpperCase();
+    if (manual === 'NONE') return { source: null, stocked: false };
     if (manual === 'OPD') return { source: 'OPD', stocked: false };
     if (manual === 'MAIN') return { source: 'MAIN', stocked: true };
     var manualPar = (toNumber(drug.min_par) || 0) > 0 || toNumber(drug.par_override) !== null;
