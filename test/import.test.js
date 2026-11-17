@@ -143,18 +143,20 @@ test('recompute: use-frequency rule, pharmacist source wins, columns kept', () =
   const set = (name, fields) => Db.updateFields('Drugs', [{ ...d[name], ...fields }], Object.keys(fields), ss);
   set('Busy', { location: 'ตู้เก็บยา' });
   set('Forced', { source: 'MAIN' });
+  set('Slow', { source: 'NONE' });
 
   const r = Import.recompute(ss, { today: '2026-11-20' });
   const after = drugsByName(ss);
   assert.deepEqual([after.Busy.source_calc, after.Busy.stocked], ['MAIN', true]);
   assert.deepEqual([after.Weekly.source_calc, after.Weekly.stocked], ['MAIN', true]);
   assert.deepEqual([after.Slow.source_calc, after.Slow.stocked], ['OPD', false]);
+  assert.deepEqual(r.none, ['Slow']);
   assert.deepEqual([after.Forced.source_calc, after.Forced.source, after.Forced.stocked], ['OPD', 'MAIN', true]);
   assert.equal(after.Busy.location, 'ตู้เก็บยา');
   assert.equal(after.Busy.par_updated, '2026-11-20');
   assert.equal(after.Busy.use_freq, 1);
   assert.deepEqual(r.overridden, ['Forced']);
-  assert.deepEqual(r.source, { MAIN: 3, OPD: 1 });
+  assert.deepEqual(r.source, { MAIN: 3, none: 1 });
   assert.deepEqual([r.from, r.to], ['2026-08-01', '2026-08-28']); // window starts where the data starts
 });
 
@@ -181,5 +183,5 @@ test('recompute: unticking critical in Drugs is respected', () => {
 test('recompute: no usage yet', () => {
   const ss = setup();
   assert.deepEqual(Import.recompute(ss, { today: TODAY }),
-    { from: null, to: null, drugs: 0, stocked: 0, source: {}, expensive: [], overridden: [] });
+    { from: null, to: null, drugs: 0, stocked: 0, source: {}, expensive: [], overridden: [], none: [] });
 });
