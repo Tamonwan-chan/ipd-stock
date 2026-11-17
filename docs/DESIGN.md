@@ -65,7 +65,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 
 ## 4. Data model (one sheet tab per table, row 1 = headers)
 
-Defined in `src/Schema.js`; **IPD › ตั้งค่าแท็บข้อมูล** (`setupSheets` → `Db.ensureSchema`) creates missing tabs, appends missing columns to row 1 (never reorders or deletes), and adds missing Settings keys with their defaults. Other tabs, such as the original HOSxP export, are left alone. Db reads columns by name, so the admin may reorder columns or add their own.
+Defined in `src/Schema.js`; **IPD › ตั้งค่าแท็บข้อมูล** (`setupSheets` → `Db.ensureSchema`) creates missing tabs, appends missing columns to row 1 (never reorders or deletes), adds missing Settings keys with their defaults, refreshes the notes of known keys (never their values), and lists Settings keys the code no longer reads (e.g. `main_pack_share`) without deleting them. Other tabs, such as the original HOSxP export, are left alone. Db reads columns by name, so the admin may reorder columns or add their own.
 
 Each column has a type. Text columns get the plain-text format so Sheets doesn't turn values like `2026-11-17` (a `round_id`) or `00123` (an `item_code`) into a date or a number. Date columns hold real Sheet dates and are read as ISO `YYYY-MM-DD`; this needs the script and the spreadsheet both set to the Asia/Bangkok time zone. Checkbox columns read blank as FALSE.
 

@@ -33,9 +33,23 @@ test('ensureSchema: rerun changes nothing and keeps edited settings', () => {
   const row = Db.readTable('Settings', ss).find(x => x.key === 'cycle_days');
   Db.updateFields('Settings', [{ _row: row._row, value: 7 }], ['value'], ss);
   const r = Db.ensureSchema(ss);
-  assert.deepEqual(r, { created: [], addedColumns: {}, addedSettings: [] });
+  assert.deepEqual(r, { created: [], addedColumns: {}, addedSettings: [], updatedNotes: [], unusedSettings: [] });
   assert.equal(Db.settings(ss).cycle_days, 7);
   assert.equal(Db.readTable('Settings', ss).length, Object.keys(Calc.DEFAULTS).length);
+});
+
+test('ensureSchema: refreshes stale notes, keeps values, reports unused keys', () => {
+  const ss = fresh();
+  const row = Db.readTable('Settings', ss).find(x => x.key === 'lead_days');
+  Db.updateFields('Settings', [{ _row: row._row, value: 2, note: 'old note' }], ['value', 'note'], ss);
+  Db.upsert('Settings', [{ key: 'old_rule', value: 0.8, note: '' }, { key: 'usage_from', value: '2026-08-01', note: '' }], ss);
+  const r = Db.ensureSchema(ss);
+  assert.deepEqual(r.updatedNotes, ['lead_days']);
+  assert.deepEqual(r.unusedSettings, ['old_rule']);
+  const s = Db.readTable('Settings', ss).find(x => x.key === 'lead_days');
+  assert.equal(s.note, Schema.SETTING_NOTES.lead_days);
+  assert.equal(Db.settings(ss).lead_days, 2);
+  assert.ok(Db.readTable('Settings', ss).some(x => x.key === 'old_rule')); // reported, not deleted
 });
 
 test('ensureSchema: adds missing columns at the end, keeps order and data', () => {

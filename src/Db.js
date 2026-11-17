@@ -106,14 +106,17 @@ var Db = (function () {
 
   /**
    * Create missing tabs, add missing columns at the end of row 1 (never reorders or
-   * deletes), format columns by type, freeze the header, and add missing Settings keys
-   * with their defaults. Tabs that aren't in the schema are left alone. Safe to rerun.
-   * @return {{created:string[], addedColumns:Object<string,string[]>, addedSettings:string[]}}
+   * deletes), format columns by type, freeze the header, add missing Settings keys
+   * with their defaults, and refresh the note of known keys (values are never touched).
+   * Settings keys the code no longer reads are reported, not deleted. Tabs that aren't in
+   * the schema are left alone. Safe to rerun.
+   * @return {{created:string[], addedColumns:Object<string,string[]>, addedSettings:string[],
+   *           updatedNotes:string[], unusedSettings:string[]}}
    */
   function ensureSchema(ss) {
     var S = schema_();
     var book = spreadsheet_(ss);
-    var report = { created: [], addedColumns: {}, addedSettings: [] };
+    var report = { created: [], addedColumns: {}, addedSettings: [], updatedNotes: [], unusedSettings: [] };
 
     S.ORDER.forEach(function (name) {
       var sh = book.getSheetByName(name);
@@ -136,8 +139,18 @@ var Db = (function () {
     });
 
     var have = {};
-    readTable('Settings', book).forEach(function (r) { have[r.key] = true; });
     var defaults = calc_().DEFAULTS;
+    var written = { usage_from: true, usage_to: true }; // written by recompute, not in DEFAULTS
+    var stale = [];
+    readTable('Settings', book).forEach(function (r) {
+      if (!r.key) return;
+      have[r.key] = true;
+      var note = S.SETTING_NOTES[r.key];
+      if (note && r.note !== note) { r.note = note; stale.push(r); }
+      if (!(r.key in defaults) && !written[r.key]) report.unusedSettings.push(r.key);
+    });
+    if (stale.length) updateFields('Settings', stale, ['note'], book);
+    report.updatedNotes = stale.map(function (r) { return r.key; });
     var add = Object.keys(defaults).filter(function (k) { return !have[k]; }).map(function (k) {
       return { key: k, value: defaults[k], note: S.SETTING_NOTES[k] || '' };
     });
