@@ -1,0 +1,792 @@
+<script>
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------------ state
+  var S = {
+    state: null,          // from apiState
+    tab: null,
+    parsed: null,         // file read in the import tab
+    pending: {},          // drug_id -> unsaved edit
+    saveTimer: null,
+    saving: false,
+    lastSaved: null,
+    filter: '',
+    onlyOrder: false,
+    opdSel: {},           // drug_id -> true
+    opdQty: {},           // drug_id -> qty typed
+    opdFilter: '',
+    head: { book: '', no: '', from: 'ห้องยาผู้ป่วยใน (IPD)', to: 'คลังยา', date: '' }
+  };
+  var LINES_PER_PAGE = 19;
+  var MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  var FLAG_TEXT = {
+    NOT_COUNTED: ['ยังไม่นับ', 'warn'],
+    BELOW_MIN: ['ต่ำกว่า min — ขอจาก OPD วันนี้', 'danger'],
+    CRITICAL_LOW: ['ยาห้ามขาด ต่ำกว่ายอด', 'danger'],
+    BIG_ORDER: ['เบิกมากผิดปกติ ตรวจยอดนับ', 'warn'],
+    NO_USAGE_DATA: ['ยอดจากเภสัชกำหนด', ''],
+    EDITED: ['แก้จำนวน', '']
+  };
+
+  // ---------------------------------------------------------------- helpers
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function num(v) {
+    if (v === null || v === undefined || String(v).trim() === '') return null;
+    var n = Number(String(v).replace(/,/g, '').trim());
+    return isFinite(n) ? n : null;
+  }
+  function fmt(n, d) {
+    if (n === null || n === undefined || n === '') return '';
+    return Number(n).toLocaleString('th-TH', { maximumFractionDigits: d === undefined ? 2 : d });
+  }
+  function thDate(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    return m ? (+m[3]) + ' ' + MONTHS[+m[2] - 1] + ' ' + (+m[1] + 543) : '';
+  }
+  function run(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      r[fn].apply(r, args);
+    });
+  }
+  var toastTimer;
+  function toast(msg, isError) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.className = 'toast'; }, isError ? 6000 : 2500);
+  }
+  function errMsg(e) { return (e && e.message) || String(e); }
+  function store(key, val) { try { localStorage.setItem('ipd.' + key, JSON.stringify(val)); } catch (e) {} }
+  function load(key, dflt) { try { var v = localStorage.getItem('ipd.' + key); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } }
+
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+      toast(ok ? 'คัดลอกแล้ว วางใน Excel หรือ Google Sheets ได้' : 'คัดลอกไม่ได้ ให้ใช้ปุ่มดาวน์โหลดแทน', !ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast('คัดลอกแล้ว วางใน Excel หรือ Google Sheets ได้'); }, fallback);
+    } else fallback();
+  }
+  function download(name, text) {
+    var blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+  function csvCell(v) { var s = String(v === null || v === undefined ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function toCsv(rows) { return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
+
+  // ---------------------------------------------------------- calculations
+  // Same rules as Calc.suggestOrder on the server; the server recomputes on save.
+  function suggest(par, onHand, factor) {
+    var c = num(onHand);
+    if (c === null) return null;
+    var f = factor || 1;
+    return Math.ceil(Math.max(0, par - c * f) / f - 1e-9) + 0;
+  }
+  function lineOf(d) {
+    var saved = (S.state.lines && S.state.lines[d.drug_id]) || {};
+    var p = S.pending[d.drug_id];
+    var onHand = p ? p.on_hand : saved.on_hand;
+    var finalQty = p ? p.final_qty : saved.final_qty;
+    var reason = p ? p.change_reason : saved.change_reason;
+    var sug = suggest(d.par, onHand, d.factor);
+    var fq = num(finalQty);
+    return {
+      on_hand: onHand === undefined || onHand === null ? '' : onHand,
+      suggested: sug,
+      final_qty: fq,
+      qty: fq !== null ? fq : sug,
+      reason: reason || '',
+      flags: p ? null : (saved.flags || ''),
+      counted: num(onHand) !== null
+    };
+  }
+  function stockedDrugs() {
+    return S.state.drugs.filter(function (d) { return d.stocked; }).sort(function (a, b) {
+      var la = a.location || '￿', lb = b.location || '￿';
+      if (la !== lb) return la < lb ? -1 : 1;
+      var sa = a.shelf_order === null ? 1e9 : a.shelf_order, sb = b.shelf_order === null ? 1e9 : b.shelf_order;
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name);
+    });
+  }
+  function orderLines() {
+    if (!S.state.round) return [];
+    return stockedDrugs().map(function (d) { return { d: d, l: lineOf(d) }; })
+      .filter(function (x) { return x.l.qty !== null && x.l.qty > 0; });
+  }
+
+  // -------------------------------------------------------------- loading
+  function reload(roundId) {
+    return run('apiState', roundId || null).then(function (st) {
+      S.state = st;
+      S.head.date = thDate(st.round ? st.round.count_date : st.today);
+      renderHeader();
+      renderImportStatus();
+      renderCount();
+      renderForm();
+      renderOpd();
+      renderMinMax();
+      if (!S.tab) showTab(st.usage.to ? 'count' : 'import');
+    }).catch(function (e) {
+      $('hdr-status').textContent = 'โหลดข้อมูลไม่สำเร็จ: ' + errMsg(e);
+      toast('โหลดข้อมูลไม่สำเร็จ: ' + errMsg(e), true);
+    });
+  }
+
+  function showTab(name) {
+    S.tab = name;
+    store('tab', name);
+    Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
+      b.setAttribute('aria-selected', b.getAttribute('data-tab') === name ? 'true' : 'false');
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (s) {
+      s.hidden = s.id !== 'tab-' + name;
+    });
+    if (name === 'form') renderForm();
+    if (name === 'opd') renderOpdPrint();
+    if (name === 'minmax') renderMinMax();
+  }
+
+  function renderHeader() {
+    var st = S.state;
+    var parts = [];
+    parts.push(st.usage.to ? 'ข้อมูลการใช้ยา ' + thDate(st.usage.from) + ' – ' + thDate(st.usage.to) : 'ยังไม่มีข้อมูลการใช้ยา');
+    if (st.round) parts.push('รอบนับ ' + thDate(st.round.count_date) + (st.round.status === 'APPROVED' ? ' (อนุมัติแล้ว)' : ''));
+    if (st.user) parts.push(st.user);
+    $('hdr-status').textContent = parts.join(' · ');
+  }
+
+  // ---------------------------------------------------------------- import
+  function renderImportStatus() {
+    var st = S.state, drugs = st.drugs;
+    if (!st.usage.to) {
+      $('data-status').innerHTML = '<p class="muted">ยังไม่มีข้อมูลการใช้ยาในระบบ</p>';
+      return;
+    }
+    var opd = 0, stocked = 0;
+    drugs.forEach(function (d) {
+      if (d.stocked) stocked++;
+      if (d.source === 'OPD' && d.use_freq > 0) opd++;
+    });
+    $('data-status').innerHTML =
+      '<h2>ข้อมูลในระบบ</h2>' +
+      '<p class="muted small">ใช้ข้อมูลวันที่ ' + thDate(st.usage.from) + ' – ' + thDate(st.usage.to) +
+      ' · ยอดที่ควรมี = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรอง</p>' +
+      '<div class="stats">' +
+      stat(drugs.length, 'ยาทั้งหมด') + stat(stocked, 'ต้องนับและเบิกจากคลัง') +
+      stat(opd, 'ใช้ไม่บ่อย: ขอจาก OPD') +
+      '</div>' +
+      '<p class="muted small">ยาที่มีการใช้อย่างน้อย 1 ใน ' + Math.round(1 / st.settings.min_use_freq) +
+      ' วัน → เบิกจากคลัง น้อยกว่านั้น → ขอจาก OPD เภสัชเปลี่ยนได้ในคอลัมน์ source ของแท็บ Drugs</p>';
+  }
+  function stat(n, label) { return '<div class="stat"><b>' + fmt(n, 0) + '</b><span class="muted small">' + esc(label) + '</span></div>'; }
+
+  function normHead(v) { return String(v === null || v === undefined ? '' : v).trim().toLowerCase(); }
+
+  function dateText(v) {
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      var p = XLSX.SSF.parse_date_code(v);
+      return p.d + '/' + p.m + '/' + p.y;
+    }
+    if (v instanceof Date) return v.getDate() + '/' + (v.getMonth() + 1) + '/' + v.getFullYear();
+    return String(v === null || v === undefined ? '' : v).trim();
+  }
+
+  function sortableDate(s) {
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+    if (m) { var y = +m[3]; if (y > 2400) y -= 543; return y * 10000 + (+m[2]) * 100 + (+m[1]); }
+    m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    return m ? +m[1] * 10000 + (+m[2]) * 100 + (+m[3]) : null;
+  }
+  function isoFromSortable(n) {
+    var y = Math.floor(n / 10000), m = Math.floor(n / 100) % 100, d = n % 100;
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+  }
+
+  function decodeText(buf) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder('windows-874').decode(buf); } // Thai Windows encoding
+  }
+
+  function parseFile(file) {
+    return file.arrayBuffer().then(function (buf) {
+      var wb = /\.csv$/i.test(file.name)
+        ? XLSX.read(decodeText(buf), { type: 'string', raw: true })
+        : XLSX.read(buf, { type: 'array' });
+      var need = ['order_date', 'drug_name', 'strength', 'drug_unit', 'total_quantity'];
+      for (var si = 0; si < wb.SheetNames.length; si++) {
+        var aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[si]], { header: 1, raw: true, defval: '' });
+        for (var h = 0; h < Math.min(aoa.length, 30); h++) {
+          var heads = aoa[h].map(normHead);
+          if (need.every(function (n) { return heads.indexOf(n) >= 0; })) {
+            var c = {};
+            need.concat(['unit_price']).forEach(function (n) { c[n] = heads.indexOf(n); });
+            return rowsFrom(aoa, h, c, file.name, wb.SheetNames[si]);
+          }
+        }
+      }
+      throw new Error('ไม่พบหัวคอลัมน์ ' + need.join(', ') + ' ในไฟล์นี้');
+    });
+  }
+
+  function rowsFrom(aoa, h, c, fileName, sheetName) {
+    var rows = [], zero = 0, minD = null, maxD = null, names = {};
+    for (var j = h + 1; j < aoa.length; j++) {
+      var r = aoa[j];
+      var name = String(r[c.drug_name] === undefined ? '' : r[c.drug_name]).trim();
+      if (!name || normHead(name) === 'drug_name') continue;
+      var qty = r[c.total_quantity];
+      if (num(qty) === 0) { zero++; continue; }
+      var date = dateText(r[c.order_date]);
+      var sd = sortableDate(date);
+      if (sd !== null) { if (minD === null || sd < minD) minD = sd; if (maxD === null || sd > maxD) maxD = sd; }
+      names[name + '|' + r[c.strength] + '|' + r[c.drug_unit]] = 1;
+      rows.push([j + 1, date, name, String(r[c.strength]).trim(), String(r[c.drug_unit]).trim(), qty,
+        c.unit_price >= 0 ? r[c.unit_price] : '']);
+    }
+    return {
+      fileName: fileName, sheetName: sheetName, rows: rows, zero: zero, drugs: Object.keys(names).length,
+      from: minD === null ? null : isoFromSortable(minD), to: maxD === null ? null : isoFromSortable(maxD)
+    };
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    $('import-result').innerHTML = '';
+    $('import-preview').innerHTML = '<p><span class="spinner"></span> กำลังอ่านไฟล์ ' + esc(file.name) + '…</p>';
+    if (typeof XLSX === 'undefined') {
+      $('import-preview').innerHTML = '<div class="notice error">โหลดตัวอ่านไฟล์ Excel ไม่ได้ (ตรวจการเชื่อมต่ออินเทอร์เน็ต) แล้วลองใหม่</div>';
+      return;
+    }
+    parseFile(file).then(function (p) {
+      S.parsed = p;
+      renderPreview();
+    }).catch(function (e) {
+      S.parsed = null;
+      $('import-preview').innerHTML = '<div class="notice error">อ่านไฟล์ไม่ได้: ' + esc(errMsg(e)) + '</div>';
+    });
+  }
+
+  function renderPreview() {
+    var p = S.parsed;
+    if (!p) { $('import-preview').innerHTML = ''; return; }
+    var sample = p.rows.slice(0, 5).map(function (r) {
+      return '<tr><td>' + esc(r[1]) + '</td><td>' + esc(r[2]) + '</td><td>' + esc(r[3]) + '</td><td>' + esc(r[4]) +
+        '</td><td class="num">' + esc(r[5]) + '</td></tr>';
+    }).join('');
+    $('import-preview').innerHTML =
+      '<div class="notice">' +
+      '<b>' + esc(p.fileName) + '</b> (แผ่นงาน ' + esc(p.sheetName) + ')<br>' +
+      fmt(p.rows.length, 0) + ' แถว · ยา ' + fmt(p.drugs, 0) + ' รายการ · วันที่ ' + thDate(p.from) + ' – ' + thDate(p.to) +
+      (p.zero ? ' · ข้ามแถวจำนวน 0 อีก ' + fmt(p.zero, 0) + ' แถว' : '') +
+      '</div>' +
+      '<div class="table-wrap"><table class="plain"><thead><tr><th>วันที่</th><th>ยา</th><th>ขนาด</th><th>หน่วย</th><th class="num">จำนวน</th></tr></thead><tbody>' +
+      sample + '</tbody></table></div>' +
+      '<div class="row"><button class="btn primary" id="btn-import">นำเข้า ' + fmt(p.rows.length, 0) + ' แถว</button>' +
+      '<button class="btn" id="btn-import-cancel">ยกเลิก</button></div>';
+    $('btn-import').onclick = doImport;
+    $('btn-import-cancel').onclick = function () { S.parsed = null; $('file').value = ''; renderPreview(); };
+  }
+
+  function doImport() {
+    var p = S.parsed;
+    if (!p || !p.rows.length) return;
+    $('btn-import').disabled = true;
+    $('import-result').innerHTML = '<p><span class="spinner"></span> กำลังนำเข้าและคำนวณใหม่… อาจใช้เวลาราว 10–60 วินาที</p>';
+    run('apiImportFile', p.rows).then(function (r) {
+      if (!r.ok) {
+        $('import-result').innerHTML = '<div class="notice error"><b>นำเข้าไม่สำเร็จ ยังไม่มีการบันทึกข้อมูล</b><ul>' +
+          r.errors.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+        $('btn-import').disabled = false;
+        return;
+      }
+      var rc = r.recompute || { source: {} };
+      S.parsed = null; $('file').value = '';
+      $('import-preview').innerHTML = '';
+      $('import-result').innerHTML = '<div class="notice ok"><b>นำเข้าสำเร็จ</b><ul>' +
+        '<li>' + fmt(r.rows, 0) + ' แถว วันที่ ' + thDate(r.from) + ' – ' + thDate(r.to) + '</li>' +
+        '<li>ข้อมูลการใช้ยา: แทนที่ ' + fmt(r.usage.removed, 0) + ' แถวเดิม เพิ่ม ' + fmt(r.usage.added, 0) + ' แถว</li>' +
+        '<li>ยาใหม่ ' + r.newDrugs.length + ' รายการ · ปรับราคา ' + r.priceUpdates + ' รายการ</li>' +
+        '<li>เบิกจากคลัง ' + (rc.source.MAIN || 0) + ' · ขอจาก OPD ' + (rc.source.OPD || 0) +
+        ' · ต้องนับ ' + rc.stocked + ' รายการ</li>' +
+        (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ตอนนี้ให้ขอจาก OPD ถ้าจะสต็อก ให้เภสัชกำหนด min_par ในแท็บ Drugs</li>' : '') +
+        '</ul></div>';
+      return reload();
+    }).catch(function (e) {
+      $('import-result').innerHTML = '<div class="notice error">นำเข้าไม่สำเร็จ: ' + esc(errMsg(e)) + '</div>';
+      $('btn-import').disabled = false;
+    });
+  }
+
+  // ----------------------------------------------------------------- count
+  function renderCount() {
+    var st = S.state, box = $('count-body');
+    if (!st.usage.to) {
+      box.innerHTML = '<div class="card"><p>ยังไม่มีข้อมูลการใช้ยา นำเข้าไฟล์จาก HOSxP ที่แท็บ 1 ก่อน</p></div>';
+      return;
+    }
+    if (!st.round) {
+      box.innerHTML = '<div class="card"><h2>ยังไม่มีรอบนับที่เปิดอยู่</h2>' +
+        '<p class="muted">เริ่มรอบใหม่เมื่อจะนับยาเพื่อเบิกจากคลัง (ทุก ' + st.settings.cycle_days + ' วัน)</p>' +
+        '<button class="btn primary" id="btn-start">เริ่มนับรอบใหม่ วันที่ ' + thDate(st.today) + '</button></div>';
+      $('btn-start').onclick = startRound;
+      return;
+    }
+    var locked = st.round.status === 'APPROVED';
+    var drugs = stockedDrugs();
+    var c = counts(drugs), counted = c.counted, ordering = c.ordering;
+    var pct = drugs.length ? Math.round(100 * counted / drugs.length) : 0;
+
+    var roundOpts = st.rounds.map(function (r) {
+      return '<option value="' + esc(r.round_id) + '"' + (r.round_id === st.round.round_id ? ' selected' : '') + '>' +
+        esc(thDate(r.count_date)) + (r.status === 'APPROVED' ? ' (อนุมัติแล้ว)' : ' (กำลังนับ)') + '</option>';
+    }).join('');
+
+    box.innerHTML =
+      '<div class="card">' +
+      '<div class="row"><h2>รอบนับ ' + thDate(st.round.count_date) + '</h2>' +
+      (locked ? '<span class="badge ok">อนุมัติแล้ว ' + esc(st.round.approved_at) + '</span>' : '<span class="badge">กำลังนับ</span>') +
+      '<span class="spacer"></span><label class="small muted">ดูรอบ <select id="round-pick">' + roundOpts + '</select></label></div>' +
+      '<p class="muted small">สูงสุด (max) = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรอง: เบิกเติมให้ถึงยอดนี้ · ' +
+      'ต่ำสุด (min) = ใช้เฉลี่ยต่อวัน × ' + st.settings.min_days + ' วัน + ยาสำรอง: ถ้าเหลือน้อยกว่านี้ ยาจะหมดก่อนของจากคลังมาถึง ให้ขอจาก OPD วันนี้ ' +
+      '(ข้อมูล ' + thDate(st.usage.from) + ' – ' + thDate(st.usage.to) + ') ใส่จำนวนคงเหลือที่นับได้ แล้วโปรแกรมคำนวณยอดเบิกให้ ' +
+      'ช่องว่าง = ยังไม่นับ, 0 = หมด</p>' +
+      '<div class="row small"><span><b id="cnt-counted">' + counted + '</b> / ' + drugs.length + ' รายการนับแล้ว</span>' +
+      '<span>· ต้องเบิก <b id="cnt-order">' + ordering + '</b> รายการ</span>' +
+      '<span>· ต่ำกว่า min <b id="cnt-below">' + c.below + '</b> รายการ</span><span class="spacer"></span>' +
+      '<span id="save-state" class="save-state muted"></span></div>' +
+      '<div class="progress"><div id="cnt-bar" style="width:' + pct + '%"></div></div>' +
+      '</div>' +
+      '<div class="toolbar row no-print">' +
+      '<input type="search" id="count-search" placeholder="ค้นหายา" value="' + esc(S.filter) + '">' +
+      '<label class="check small"><input type="checkbox" id="only-order"' + (S.onlyOrder ? ' checked' : '') + '> เฉพาะที่ต้องเบิก</label>' +
+      '<span class="spacer"></span>' +
+      (locked ? '' : '<button class="btn" id="btn-approve">อนุมัติรอบนี้</button>') +
+      '</div>' +
+      '<div id="drug-list"></div>';
+
+    $('round-pick').onchange = function () { flushSave().then(function () { return reload($('round-pick').value); }); };
+    $('count-search').oninput = function () { S.filter = this.value; renderDrugList(); };
+    $('only-order').onchange = function () { S.onlyOrder = this.checked; renderDrugList(); };
+    if (!locked) setupApprove();
+    renderDrugList();
+    renderSaveState();
+  }
+
+  function renderDrugList() {
+    var st = S.state, locked = st.round.status === 'APPROVED';
+    var q = S.filter.trim().toLowerCase();
+    var html = '', lastLoc = null, shown = 0;
+    html += '<div class="drow head"><span>ยา</span><span class="num">สูงสุด / ต่ำสุด</span><span class="num">คงเหลือ (นับ)</span>' +
+      '<span class="num">ควรเบิก</span><span class="num">เบิกจริง</span></div>';
+    stockedDrugs().forEach(function (d) {
+      var l = lineOf(d);
+      if (q && (d.name + ' ' + d.hosxp_name + ' ' + d.strength).toLowerCase().indexOf(q) < 0) return;
+      if (S.onlyOrder && !(l.qty > 0)) return;
+      var loc = d.location || 'ยังไม่ระบุที่เก็บ';
+      if (loc !== lastLoc) { html += '<div class="loc-head">' + esc(loc) + '</div>'; lastLoc = loc; }
+      shown++;
+      html += rowHtml(d, l, locked);
+    });
+    if (!shown) html += '<p class="muted">ไม่มีรายการ</p>';
+    $('drug-list').innerHTML = html;
+    Array.prototype.forEach.call($('drug-list').querySelectorAll('input[data-f]'), function (inp) {
+      inp.oninput = onEdit;
+    });
+  }
+
+  function rowHtml(d, l, locked) {
+    var dis = locked ? ' disabled' : '';
+    var edited = l.final_qty !== null && l.final_qty !== l.suggested;
+    var flags = flagBadges(d, l);
+    return '<div class="drow' + (l.qty > 0 ? ' has-order' : '') + (belowMin(d, l) ? ' below-min' : '') + '" id="row-' + esc(d.drug_id) + '">' +
+      '<div class="cell-name"><div class="name">' + esc(d.name) +
+      (d.critical ? ' <span class="badge danger">ห้ามขาด</span>' : '') + '</div>' +
+      '<div class="meta">' + esc(d.strength) + ' · ' + esc(d.unit) +
+      (d.factor > 1 ? ' (' + fmt(d.factor) + ' ' + esc(d.hosxp_unit || '') + ')' : '') + '</div></div>' +
+      '<div class="num mm"><span class="lbl">สูงสุด / ต่ำสุด</span><b>' + fmt(d.par / (d.factor || 1), 1) + '</b>' +
+      '<span class="muted"> / ' + fmt(d.min / (d.factor || 1), 1) + '</span></div>' +
+      '<div><span class="lbl">คงเหลือ (นับ)</span><input type="number" inputmode="decimal" step="any" min="0" data-f="on_hand" data-id="' +
+      esc(d.drug_id) + '" value="' + esc(l.on_hand) + '"' + dis + '></div>' +
+      '<div class="num"><span class="lbl">ควรเบิก</span><span data-sug="' + esc(d.drug_id) + '">' + (l.suggested === null ? '–' : fmt(l.suggested, 0)) + '</span></div>' +
+      '<div><span class="lbl">เบิกจริง</span><input type="number" inputmode="numeric" step="1" min="0" data-f="final_qty" data-id="' +
+      esc(d.drug_id) + '" value="' + (l.final_qty === null ? '' : esc(l.final_qty)) + '" placeholder="' +
+      (l.suggested === null ? '' : esc(l.suggested)) + '"' + dis + '></div>' +
+      '<div class="reason"' + (edited ? '' : ' hidden') + '><input type="text" data-f="change_reason" data-id="' + esc(d.drug_id) +
+      '" placeholder="เหตุผลที่แก้จำนวน" value="' + esc(l.reason) + '"' + dis + '></div>' +
+      '<div class="flags">' + flags + '</div>' +
+      '</div>';
+  }
+
+  function flagBadges(d, l) {
+    var codes;
+    if (l.flags !== null) codes = l.flags ? l.flags.split(' ') : [];
+    else {
+      codes = [];
+      if (!l.counted) codes.push('NOT_COUNTED');
+      if (belowMin(d, l)) codes.push('BELOW_MIN');
+      if (d.critical && l.counted && num(l.on_hand) * (d.factor || 1) < d.par) codes.push('CRITICAL_LOW');
+      var cycleUse = d.mean_daily * S.state.settings.cycle_days;
+      if (l.counted && cycleUse > 0 && (l.suggested || 0) * (d.factor || 1) > 2 * cycleUse) codes.push('BIG_ORDER');
+      if (d.par_source !== 'calc') codes.push('NO_USAGE_DATA');
+      if (l.final_qty !== null && l.final_qty !== l.suggested) codes.push('EDITED');
+    }
+    return codes.filter(function (c) { return c !== 'NOT_COUNTED'; }).map(function (c) {
+      var t = FLAG_TEXT[c] || [c, ''];
+      return '<span class="badge ' + t[1] + '">' + esc(t[0]) + '</span>';
+    }).join('');
+  }
+
+  // Same rule as the server's BELOW_MIN flag.
+  function belowMin(d, l) {
+    return l.counted && d.min > 0 && num(l.on_hand) * (d.factor || 1) < d.min;
+  }
+
+  function counts(drugs) {
+    var c = { counted: 0, ordering: 0, below: 0 };
+    drugs.forEach(function (d) {
+      var l = lineOf(d);
+      if (l.counted) c.counted++;
+      if (l.qty > 0) c.ordering++;
+      if (belowMin(d, l)) c.below++;
+    });
+    return c;
+  }
+
+  function onEdit() {
+    var id = this.getAttribute('data-id'), field = this.getAttribute('data-f');
+    var d = S.state.drugs.filter(function (x) { return x.drug_id === id; })[0];
+    var cur = lineOf(d);
+    var p = S.pending[id] || { drug_id: id, on_hand: cur.on_hand, final_qty: cur.final_qty === null ? '' : cur.final_qty, change_reason: cur.reason };
+    p[field] = this.value;
+    S.pending[id] = p;
+    refreshRow(d);
+    scheduleSave();
+  }
+
+  function refreshRow(d) {
+    var l = lineOf(d);
+    var row = $('row-' + d.drug_id);
+    if (!row) return;
+    row.classList.toggle('has-order', l.qty > 0);
+    row.classList.toggle('below-min', belowMin(d, l));
+    var sug = row.querySelector('[data-sug]');
+    sug.textContent = l.suggested === null ? '–' : fmt(l.suggested, 0);
+    row.querySelector('input[data-f="final_qty"]').placeholder = l.suggested === null ? '' : l.suggested;
+    row.querySelector('.reason').hidden = !(l.final_qty !== null && l.final_qty !== l.suggested);
+    row.querySelector('.flags').innerHTML = flagBadges(d, l);
+    // counters
+    var drugs = stockedDrugs(), c = counts(drugs);
+    $('cnt-counted').textContent = c.counted;
+    $('cnt-order').textContent = c.ordering;
+    $('cnt-below').textContent = c.below;
+    $('cnt-bar').style.width = (drugs.length ? Math.round(100 * c.counted / drugs.length) : 0) + '%';
+  }
+
+  function scheduleSave() {
+    renderSaveState();
+    clearTimeout(S.saveTimer);
+    S.saveTimer = setTimeout(flushSave, 1200);
+  }
+
+  function flushSave() {
+    clearTimeout(S.saveTimer);
+    var ids = Object.keys(S.pending);
+    if (!ids.length || S.saving || !S.state.round) return Promise.resolve();
+    var batch = ids.map(function (id) { return S.pending[id]; });
+    var sent = {};
+    ids.forEach(function (id) { sent[id] = JSON.stringify(S.pending[id]); });
+    S.saving = true;
+    renderSaveState();
+    return run('apiSaveLines', S.state.round.round_id, batch).then(function (saved) {
+      Object.keys(saved).forEach(function (id) {
+        S.state.lines[id] = saved[id];
+        // keep edits typed while saving
+        if (S.pending[id] && JSON.stringify(S.pending[id]) === sent[id]) delete S.pending[id];
+      });
+      S.saving = false;
+      S.lastSaved = new Date();
+      Object.keys(saved).forEach(function (id) {
+        var d = S.state.drugs.filter(function (x) { return x.drug_id === id; })[0];
+        if (d && !S.pending[id]) refreshRow(d);
+      });
+      renderSaveState();
+      if (Object.keys(S.pending).length) scheduleSave();
+    }).catch(function (e) {
+      S.saving = false;
+      renderSaveState(errMsg(e));
+      toast('บันทึกไม่สำเร็จ: ' + errMsg(e) + ' (จะลองใหม่เมื่อแก้ไขครั้งถัดไป)', true);
+    });
+  }
+
+  function renderSaveState(error) {
+    var el = $('save-state');
+    if (!el) return;
+    var n = Object.keys(S.pending).length;
+    if (error) { el.innerHTML = '<span class="badge danger">บันทึกไม่สำเร็จ ' + n + ' รายการ</span>'; return; }
+    if (S.saving) { el.innerHTML = '<span class="spinner"></span> กำลังบันทึก…'; return; }
+    if (n) { el.textContent = 'รอบันทึก ' + n + ' รายการ'; return; }
+    el.textContent = S.lastSaved ? 'บันทึกแล้ว ' + S.lastSaved.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
+  }
+
+  function startRound() {
+    $('btn-start').disabled = true;
+    run('apiStartRound').then(function () { return reload(); }).catch(function (e) {
+      toast('เริ่มรอบไม่สำเร็จ: ' + errMsg(e), true);
+      $('btn-start').disabled = false;
+    });
+  }
+
+  function setupApprove() {
+    var btn = $('btn-approve'), armed = false, t;
+    btn.onclick = function () {
+      if (!armed) {
+        armed = true; btn.classList.add('armed'); btn.textContent = 'กดอีกครั้งเพื่อยืนยันอนุมัติ (แก้ไขไม่ได้อีก)';
+        t = setTimeout(function () { armed = false; btn.classList.remove('armed'); btn.textContent = 'อนุมัติรอบนี้'; }, 4000);
+        return;
+      }
+      clearTimeout(t);
+      btn.disabled = true;
+      flushSave().then(function () { return run('apiApproveRound', S.state.round.round_id); })
+        .then(function () { toast('อนุมัติแล้ว'); return reload(S.state.round.round_id); })
+        .catch(function (e) { toast('อนุมัติไม่สำเร็จ: ' + errMsg(e), true); btn.disabled = false; });
+    };
+  }
+
+  // ------------------------------------------------------------------ form
+  function formLines() {
+    return orderLines().map(function (x, i) {
+      return { no: i + 1, code: x.d.item_code, name: x.d.name + (x.d.strength && x.d.name.indexOf(x.d.strength) < 0 ? ' ' + x.d.strength : ''),
+        unit: x.d.unit, onHand: x.l.on_hand, qty: x.l.qty };
+    });
+  }
+
+  function renderForm() {
+    if (!S.state) return;
+    ['book', 'no', 'from', 'to', 'date'].forEach(function (k) { var el = $('fh-' + k); if (el && document.activeElement !== el) el.value = S.head[k]; });
+    var lines = formLines();
+    var box = $('form-pages');
+    if (!S.state.round) { box.innerHTML = '<div class="card">ยังไม่มีรอบนับ เริ่มรอบที่แท็บ 2 ก่อน</div>'; $('form-summary').textContent = ''; return; }
+    var pages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
+    $('form-summary').textContent = lines.length + ' รายการ · ' + pages + ' แผ่น' +
+      (S.state.round.status === 'APPROVED' ? '' : ' · รอบนี้ยังไม่อนุมัติ');
+    var html = '';
+    for (var p = 0; p < pages; p++) {
+      var slice = lines.slice(p * LINES_PER_PAGE, (p + 1) * LINES_PER_PAGE);
+      var body = '';
+      for (var i = 0; i < LINES_PER_PAGE; i++) {
+        var l = slice[i];
+        body += l ? '<tr><td class="c">' + l.no + '</td><td>' + esc(l.code) + '</td><td>' + esc(l.name) + '</td><td class="c">' + esc(l.unit) +
+          '</td><td class="n">' + esc(fmt(num(l.onHand))) + '</td><td class="n">' + esc(fmt(l.qty, 0)) + '</td><td></td><td></td><td></td><td></td></tr>'
+          : '<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>';
+      }
+      html += '<div class="form-page">' +
+        '<div class="fp-title"><div>เล่มที่ <span class="fill">' + esc(S.head.book) + '</span></div><h1>ใบเบิกหรือใบส่งคืน</h1>' +
+        '<div class="r">เลขที่ <span class="fill">' + esc(S.head.no) + '</span></div></div>' +
+        '<table class="fp-head"><tr><td style="width:55%">แผ่นที่ ' + (p + 1) + ' &nbsp; จำนวน ' + pages + ' แผ่น</td><td>' + esc(S.head.date) + '</td></tr>' +
+        '<tr><td>จาก ' + esc(S.head.from) + '</td><td rowspan="3"></td></tr>' +
+        '<tr><td>ถึง ' + esc(S.head.to) + '</td></tr>' +
+        '<tr><td>ประเภทพัสดุและ/หรือครุภัณฑ์ที่เกี่ยวข้อง: ยา</td></tr></table>' +
+        '<table class="fp-lines"><thead><tr>' +
+        '<th style="width:7%">ลำดับ</th><th style="width:9%">หมายเลขพัสดุ</th><th>รายการ</th><th style="width:8%">หน่วยนับ</th>' +
+        '<th style="width:10%">ว.ด.ป.ที่เบิก คงเหลือจากครั้งที่แล้ว</th><th style="width:8%">จำนวนเบิกใหม่</th><th style="width:8%">จ่ายหรือรับคืน</th>' +
+        '<th style="width:7%">ราคาหน่วยละ</th><th style="width:8%">ราคารวม</th><th style="width:8%">หมายเหตุ</th>' +
+        '</tr></thead><tbody>' + body + '</tbody></table>' +
+        '<table class="fp-foot">' +
+        '<tr><td style="width:50%">หลักฐานที่ใช้เบิก/ส่งคืน</td><td>รวมแผ่นนี้</td></tr>' +
+        '<tr><td></td><td>รวมทั้งสิ้น</td></tr>' +
+        '<tr><td>ให้บุคคลต่อไปนี้เป็นผู้รับพัสดุแทนได้</td><td>ผู้อนุมัติจ่าย/รับคืน</td></tr>' +
+        '<tr><td>ผู้มีสิทธิเบิก/ส่งคืน (..............................................)</td><td></td></tr>' +
+        '<tr><td>ได้รับของตามจำนวนและรายการที่จ่ายเรียบร้อยแล้ว<br>ผู้รับพัสดุ (..............................................)</td><td>ผู้จ่าย<br>วันที่</td></tr>' +
+        '</table></div>';
+    }
+    box.innerHTML = html;
+  }
+
+  function formRows() {
+    return [['ลำดับ', 'หมายเลขพัสดุ', 'รายการ', 'หน่วยนับ', 'คงเหลือจากครั้งที่แล้ว', 'จำนวนเบิกใหม่', 'หมายเหตุ']]
+      .concat(formLines().map(function (l) { return [l.no, l.code, l.name, l.unit, l.onHand, l.qty, '']; }));
+  }
+
+  // ------------------------------------------------------------------- OPD
+  function opdDrugs() {
+    return S.state.drugs.filter(function (d) { return d.source === 'OPD' && d.use_freq > 0; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+  function opdQty(d) { var v = S.opdQty[d.drug_id]; return v === undefined || v === '' ? d.opd_suggestion : num(v); }
+
+  function renderOpd() {
+    if (!S.state) return;
+    var q = S.opdFilter.trim().toLowerCase();
+    var list = opdDrugs();
+    if (!list.length) {
+      $('opd-list').innerHTML = '<p class="muted">ยังไม่มียาที่อยู่ในกลุ่มขอจาก OPD (นำเข้าข้อมูลการใช้ยาที่แท็บ 1 ก่อน)</p>';
+      renderOpdPrint();
+      return;
+    }
+    var cyc = S.state.settings.opd_cycle_days;
+    $('opd-cycle-days').textContent = cyc;
+    var rows = list.filter(function (d) { return !q || (d.name + ' ' + d.strength).toLowerCase().indexOf(q) >= 0; }).map(function (d) {
+      var sel = !!S.opdSel[d.drug_id];
+      return '<tr><td><input type="checkbox" data-opd="' + esc(d.drug_id) + '"' + (sel ? ' checked' : '') + ' aria-label="เลือก"></td>' +
+        '<td>' + esc(d.name) + ' <span class="muted small">' + esc(d.strength) + '</span></td><td>' + esc(d.unit) + '</td>' +
+        '<td class="num">' + fmt(d.mean_daily * cyc / (d.factor || 1), 1) + '</td>' +
+        '<td style="width:90px"><input type="number" min="0" step="1" data-opdq="' + esc(d.drug_id) + '" value="' +
+        esc(S.opdQty[d.drug_id] === undefined ? '' : S.opdQty[d.drug_id]) + '" placeholder="' + esc(d.opd_suggestion) + '"></td></tr>';
+    }).join('');
+    $('opd-list').innerHTML = '<div class="table-wrap"><table class="plain"><thead><tr><th></th><th>ยา</th><th>หน่วย</th>' +
+      '<th class="num">ใช้เฉลี่ย/' + esc(cyc) + ' วัน</th><th class="num">จะขอ</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    Array.prototype.forEach.call($('opd-list').querySelectorAll('[data-opd]'), function (cb) {
+      cb.onchange = function () {
+        var id = this.getAttribute('data-opd');
+        if (this.checked) S.opdSel[id] = true; else delete S.opdSel[id];
+        store('opdSel', S.opdSel); renderOpdPrint();
+      };
+    });
+    Array.prototype.forEach.call($('opd-list').querySelectorAll('[data-opdq]'), function (inp) {
+      inp.oninput = function () {
+        var id = this.getAttribute('data-opdq');
+        S.opdQty[id] = this.value;
+        if (this.value !== '' && !S.opdSel[id]) { S.opdSel[id] = true; this.closest('tr').querySelector('[data-opd]').checked = true; }
+        store('opdSel', S.opdSel); store('opdQty', S.opdQty); renderOpdPrint();
+      };
+    });
+    renderOpdPrint();
+  }
+
+  function opdLines() {
+    return opdDrugs().filter(function (d) { return S.opdSel[d.drug_id]; })
+      .map(function (d) { return { d: d, qty: opdQty(d) }; })
+      .filter(function (x) { return x.qty > 0; });
+  }
+
+  function renderOpdPrint() {
+    if (!S.state) return;
+    var lines = opdLines();
+    if (!lines.length) { $('opd-print').innerHTML = ''; return; }
+    $('opd-print').innerHTML = '<div class="opd-page"><h1>รายการขอยาจากห้องยา OPD</h1>' +
+      '<div class="row small" style="justify-content:space-between"><span>จาก ห้องยาผู้ป่วยใน (IPD)</span><span>วันที่ ' + thDate(S.state.today) + '</span></div>' +
+      '<table><thead><tr><th style="width:10%">ลำดับ</th><th>รายการ</th><th style="width:14%">จำนวน</th><th style="width:14%">หน่วย</th><th style="width:12%">หมายเหตุ</th></tr></thead><tbody>' +
+      lines.map(function (x, i) {
+        return '<tr><td style="text-align:center">' + (i + 1) + '</td><td>' + esc(x.d.name) + ' ' + esc(x.d.strength) + '</td><td style="text-align:right">' +
+          fmt(x.qty, 0) + '</td><td>' + esc(x.d.unit) + '</td><td>IPD</td></tr>';
+      }).join('') +
+      '</tbody></table><div class="sign"><span>ผู้ขอ ........................................</span><span>ผู้จ่าย ........................................</span></div></div>';
+  }
+
+  // --------------------------------------------------------------- min/max
+  // Shelf labels in request units, rounded up so a label never shows less than the stored level.
+  function reqUnits(x, factor) { return Math.ceil((x || 0) / (factor || 1) - 1e-9); }
+
+  function mmLines() {
+    return stockedDrugs().map(function (d) {
+      return { d: d, loc: d.location || 'ยังไม่ระบุที่เก็บ', max: reqUnits(d.par, d.factor), min: reqUnits(d.min, d.factor) };
+    });
+  }
+
+  function renderMinMax() {
+    if (!S.state) return;
+    var lines = mmLines();
+    if (!lines.length) {
+      $('mm-summary').textContent = '';
+      $('mm-print').innerHTML = '<div class="card">ยังไม่มียาที่ต้องสต็อก นำเข้าข้อมูลการใช้ยาที่แท็บ 1 ก่อน</div>';
+      return;
+    }
+    $('mm-summary').textContent = lines.length + ' รายการ · ข้อมูล ' + thDate(S.state.usage.from) + ' – ' + thDate(S.state.usage.to);
+    var html = '<div class="mm-page"><h1>ยอดสูงสุด / ต่ำสุด ห้องยาผู้ป่วยใน (IPD)</h1>' +
+      '<p class="small" style="text-align:center">คำนวณจากการใช้ยา ' + thDate(S.state.usage.from) + ' – ' + thDate(S.state.usage.to) +
+      ' · พิมพ์ ' + thDate(S.state.today) + ' · ต่ำกว่ายอดต่ำสุด → ขอจาก OPD วันนี้</p>';
+    var last = null;
+    lines.forEach(function (x) {
+      if (x.loc !== last) {
+        if (last !== null) html += '</tbody></table>';
+        html += '<h2>' + esc(x.loc) + '</h2><table><thead><tr><th>ยา</th><th style="width:14%">หน่วย</th>' +
+          '<th style="width:16%">สูงสุด</th><th style="width:16%">ต่ำสุด</th></tr></thead><tbody>';
+        last = x.loc;
+      }
+      html += '<tr><td>' + esc(x.d.name) + ' <span class="small">' + esc(x.d.strength) + '</span>' +
+        (x.d.critical ? ' <b>(ห้ามขาด)</b>' : '') + '</td><td>' + esc(x.d.unit) + '</td>' +
+        '<td class="n">' + fmt(x.max, 0) + '</td><td class="n">' + fmt(x.min, 0) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    $('mm-print').innerHTML = html;
+  }
+
+  function mmRows() {
+    return [['ที่เก็บ', 'ยา', 'ขนาด', 'หน่วย', 'สูงสุด', 'ต่ำสุด', 'ยาห้ามขาด']].concat(mmLines().map(function (x) {
+      return [x.loc, x.d.name, x.d.strength, x.d.unit, x.max, x.min, x.d.critical ? 'ใช่' : ''];
+    }));
+  }
+
+  // ------------------------------------------------------------------ wiring
+  function wire() {
+    Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
+      b.onclick = function () { flushSave(); showTab(b.getAttribute('data-tab')); };
+    });
+    var drop = $('drop'), file = $('file');
+    file.onchange = function () { handleFile(file.files[0]); };
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+    });
+    drop.addEventListener('drop', function (e) { handleFile(e.dataTransfer.files[0]); });
+    // Dropping a file outside the box must not navigate away from the app.
+    window.addEventListener('dragover', function (e) { e.preventDefault(); });
+    window.addEventListener('drop', function (e) { e.preventDefault(); });
+
+    ['book', 'no', 'from', 'to', 'date'].forEach(function (k) {
+      $('fh-' + k).oninput = function () { S.head[k] = this.value; store('head', { book: S.head.book, from: S.head.from, to: S.head.to }); renderForm(); };
+    });
+    $('btn-print-form').onclick = function () { flushSave().then(function () { renderForm(); window.print(); }); };
+    $('btn-csv-form').onclick = function () {
+      download('ใบเบิก-IPD-' + (S.state.round ? S.state.round.count_date : S.state.today) + '.csv', toCsv(formRows()));
+    };
+    $('btn-copy-form').onclick = function () {
+      copyText(formRows().map(function (r) { return r.join('\t'); }).join('\n'));
+    };
+    $('opd-search').oninput = function () { S.opdFilter = this.value; renderOpd(); };
+    $('btn-opd-clear').onclick = function () { S.opdSel = {}; S.opdQty = {}; store('opdSel', {}); store('opdQty', {}); renderOpd(); };
+    $('btn-print-opd').onclick = function () {
+      if (!opdLines().length) { toast('ยังไม่ได้เลือกรายการ', true); return; }
+      window.print();
+    };
+    $('btn-print-mm').onclick = function () { renderMinMax(); window.print(); };
+    $('btn-csv-mm').onclick = function () { download('min-max-IPD-' + S.state.today + '.csv', toCsv(mmRows())); };
+    $('btn-copy-opd').onclick = function () {
+      var rows = [['ลำดับ', 'รายการ', 'จำนวน', 'หน่วย', 'หมายเหตุ']].concat(opdLines().map(function (x, i) {
+        return [i + 1, x.d.name + ' ' + x.d.strength, x.qty, x.d.unit, 'IPD'];
+      }));
+      copyText(rows.map(function (r) { return r.join('\t'); }).join('\n'));
+    };
+    window.addEventListener('beforeunload', function (e) {
+      if (Object.keys(S.pending).length) { flushSave(); e.preventDefault(); e.returnValue = ''; }
+    });
+  }
+
+  var savedHead = load('head', null);
+  if (savedHead) { S.head.book = savedHead.book || ''; S.head.from = savedHead.from || S.head.from; S.head.to = savedHead.to || S.head.to; }
+  S.opdSel = load('opdSel', {});
+  S.opdQty = load('opdQty', {});
+  wire();
+  var lastTab = load('tab', null);
+  reload().then(function () { if (lastTab && S.state) showTab(lastTab); });
+})();
+</script>

@@ -15,13 +15,14 @@ var Calc = (function () {
 
   /** Settings defaults; the Settings sheet overrides any of these. */
   var DEFAULTS = {
-    cycle_days: 7,          // days between deliveries
-    lead_days: 1,           // count day -> delivery day (Tue -> Wed)
+    cycle_days: 14,         // days between main-storage requisitions (every 2 weeks)
+    lead_days: 1,           // count day -> delivery day. Pending confirmation with IPD
     delay_days: 0,          // extra days for late delivery
     history_days: 90,       // usage history used for par
     z: 1.65,                // safety factor, normal drugs
     critical_z: 2.33,       // safety factor, critical drugs
-    min_use_freq: 1 / 7,    // below this share of days used: not stocked by default
+    min_use_freq: 1 / 7,    // used on at least this share of days -> main storage (stocked), else OPD
+    opd_cycle_days: 30,     // days between OPD requests (once a month); sizes the OPD suggestion
     expensive_value: 5000,  // THB of usage over the history window ...
     expensive_max_freq: 0.5 // ... combined with use on fewer than this share of days
   };
@@ -160,7 +161,7 @@ var Calc = (function () {
 
   // -------------------------------------------------------------------- par
 
-  /** Days from count to the next delivery, inclusive (default 7 + 1 + 1 + 0 = 9). */
+  /** Days from count to the next delivery, inclusive (default 14 + 1 + 1 + 0 = 16). */
   function windowDays(settings) {
     var s = settingsWithDefaults(settings);
     return s.cycle_days + s.lead_days + 1 + s.delay_days;
@@ -197,28 +198,125 @@ var Calc = (function () {
     return { par: par, parCalc: parCalc, source: source, W: W, mean: st.mean, sd: st.sd, useFreq: st.useFreq };
   }
 
+  /** Days from a count to that cycle's delivery, inclusive (default 1 + 1 + 0 = 2). */
+  function minDays(settings) {
+    var s = settingsWithDefaults(settings);
+    return s.lead_days + 1 + s.delay_days;
+  }
+
   /**
-   * Suggested stock-list membership and review tier for one drug.
-   * @return {{stocked:boolean, critical:boolean, tier:string}}
-   *   tier: 'placeholder' | 'critical' | 'expensive' | 'regular' | 'rare'
+   * Min (ยอดต่ำสุด) for one drug, in HOSxP units: stock that should last from a count
+   * until that cycle's delivery arrives. Below it, the drug will probably run out first,
+   * so staff fetch it from OPD the same day.
+   *   minCalc = ceil(mean·T + z·sd·√T), T = lead_days + 1 + delay_days;
+   *   critical drugs also ≥ the worst T-day demand seen.
+   * @param {number[]} series  daily usage over the history window
+   * @param {{critical?:boolean}} drug
+   * @return {{minCalc:number, T:number}}
+   */
+  function calcMin(series, drug, settings) {
+    var s = settingsWithDefaults(settings);
+    var T = minDays(s);
+    var st = usageStats(series);
+    var critical = !!(drug && drug.critical);
+    var z = critical ? s.critical_z : s.z;
+    var minCalc = st.mean > 0 ? ceilSafe(st.mean * T + z * st.sd * Math.sqrt(T)) : 0;
+    if (critical) minCalc = Math.max(minCalc, maxWindowSum(series, T));
+    return { minCalc: minCalc, T: T };
+  }
+
+  /**
+   * Min in effect for a Drugs row: min_override if set, else min_calc; never above the par
+   * in effect (a min above max would flag every count).
+   * @return {{min:number, source:string}}  source: 'override' | 'calc' | 'none'
+   */
+  function minFromStored(drug) {
+    var par = parFromStored(drug).par;
+    var override = toNumber(drug.min_override);
+    var min, source;
+    if (override !== null) { min = override; source = 'override'; }
+    else { min = toNumber(drug.min_calc) || 0; source = min > 0 ? 'calc' : 'none'; }
+    return { min: Math.min(min, par), source: source };
+  }
+
+  /**
+   * Par in effect for a Drugs row, from the stored par_calc (same rules as calcPar):
+   * par_override if set, else max(par_calc, min_par).
+   * @return {{par:number, source:string}}  source: 'override' | 'min_par' | 'calc' | 'none'
+   */
+  function parFromStored(drug) {
+    var override = toNumber(drug.par_override);
+    if (override !== null) return { par: override, source: 'override' };
+    var calc = toNumber(drug.par_calc) || 0;
+    var minPar = toNumber(drug.min_par) || 0;
+    if (minPar > calc) return { par: minPar, source: 'min_par' };
+    return { par: calc, source: calc > 0 ? 'calc' : 'none' };
+  }
+
+  /**
+   * Where a drug should come from (DESIGN §5.2): drugs used on at least min_use_freq of days
+   * (default 1/7, about weekly) → 'MAIN' (main storage, counted, par-based); rarer → 'OPD'
+   * (fetched from OPD when needed). Quantities are in units, so pack sizes play no part.
+   * @param {number} useFreq  share of days with any use in the history window
+   */
+  function supplySource(useFreq, settings) {
+    var s = settingsWithDefaults(settings);
+    return (useFreq || 0) >= s.min_use_freq - EPS ? 'MAIN' : 'OPD';
+  }
+
+  /**
+   * Suggested supply source, stock-list membership and review tier for one drug.
+   * `stocked` = counted at each round and ordered up to par from main storage.
+   * @param {{name:string, unit?:string, unit_price?:*, critical?:*}} d
+   * @param {{total?:number, useFreq:number}} stats  usageStats over the history window
+   * @return {{stocked:boolean, critical:boolean, tier:string, source:string|null}}
+   *   tier:   'placeholder' | 'critical' | 'expensive' | 'regular' | 'opd'
+   *   source: 'MAIN' | 'OPD' | null (placeholder)
    */
   function classifyDrug(d, stats, settings) {
     var s = settingsWithDefaults(settings);
-    if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder' };
-    var critical = isCriticalName(d.name);
-    if (critical) return { stocked: true, critical: true, tier: 'critical' };
+    if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder', source: null };
+    // HAD drugs must never run out: always main storage (open question in issue #3).
+    // d.critical (the Drugs column) wins when given; otherwise the HAD tag in the name decides.
+    var critical = d.critical === undefined || d.critical === null || d.critical === '' ? isCriticalName(d.name) : !!d.critical;
+    if (critical) return { stocked: true, critical: true, tier: 'critical', source: 'MAIN' };
+    var source = supplySource(stats.useFreq, s);
     var value = (stats.total || 0) * (toNumber(d.unit_price) || 0);
     if (value >= s.expensive_value && stats.useFreq < s.expensive_max_freq) {
-      return { stocked: false, critical: false, tier: 'expensive' };
+      return { stocked: false, critical: false, tier: 'expensive', source: source }; // pharmacist sets min_par
     }
-    if (stats.useFreq >= s.min_use_freq - EPS) return { stocked: true, critical: false, tier: 'regular' };
-    return { stocked: false, critical: false, tier: 'rare' };
+    if (source === 'MAIN') return { stocked: true, critical: false, tier: 'regular', source: source };
+    return { stocked: false, critical: false, tier: 'opd', source: source };
+  }
+
+  /**
+   * Final stock decision for one drug; the pharmacist's choices win over the rule.
+   *   source 'OPD' set by pharmacist    → not stocked
+   *   source 'MAIN' set by pharmacist   → stocked
+   *   min_par or par_override set       → stocked (the pharmacist wants it on the shelf)
+   *   expensive, infrequent             → OPD until the pharmacist sets a par
+   *   otherwise                         → the use-frequency rule (classifyDrug)
+   * Critical drugs are always stocked; placeholders never.
+   * @param {{source?:string, min_par?:*, par_override?:*}} drug  Drugs row
+   * @param {{stocked:boolean, critical:boolean, tier:string, source:string|null}} cls  classifyDrug result
+   * @return {{source:string|null, stocked:boolean}}  source = the one in effect
+   */
+  function stockDecision(drug, cls) {
+    if (cls.tier === 'placeholder') return { source: null, stocked: false };
+    if (cls.critical) return { source: 'MAIN', stocked: true };
+    var manual = norm(drug.source).toUpperCase();
+    if (manual === 'OPD') return { source: 'OPD', stocked: false };
+    if (manual === 'MAIN') return { source: 'MAIN', stocked: true };
+    var manualPar = (toNumber(drug.min_par) || 0) > 0 || toNumber(drug.par_override) !== null;
+    if (manualPar) return { source: 'MAIN', stocked: true };
+    if (cls.tier === 'expensive') return { source: 'OPD', stocked: false };
+    return { source: cls.source, stocked: cls.source === 'MAIN' };
   }
 
   // ------------------------------------------------------------------ order
 
   /**
-   * Quantity to request, in request units (whole units, rounded up).
+   * Quantity to request from main storage, in request units (whole units, rounded up).
    * @param {number} par            in HOSxP units
    * @param {*} countedRequestUnits on hand, in request units (may be decimal); blank = not counted
    * @param {*} requestFactor       HOSxP units per request unit (blank = 1)
@@ -236,7 +334,7 @@ var Calc = (function () {
   /**
    * Review flags for one round line.
    * @param {{critical?:boolean, stocked?:boolean}} drug
-   * @param {{par:number, source:string, mean:number}} parInfo
+   * @param {{par:number, source:string, mean:number, min?:number}} parInfo  min in HOSxP units (minFromStored)
    * @param {{counted:boolean, onHand:number|null, qty:number|null}} order
    * @param {*} finalQty  pharmacist's quantity (blank = unchanged)
    * @param {*} requestFactor
@@ -248,29 +346,70 @@ var Calc = (function () {
     var f = toNumber(requestFactor) || 1;
     var flags = [];
     if (!order.counted) flags.push('NOT_COUNTED');
+    if (order.counted && parInfo.min > 0 && order.onHand < parInfo.min) flags.push('BELOW_MIN');
     if (drug.critical && order.counted && order.onHand < parInfo.par) flags.push('CRITICAL_LOW');
-    var weekly = parInfo.mean * s.cycle_days;
-    if (order.counted && weekly > 0 && order.qty * f > 2 * weekly) flags.push('BIG_ORDER');
+    var cycleUse = parInfo.mean * s.cycle_days;
+    if (order.counted && cycleUse > 0 && order.qty * f > 2 * cycleUse) flags.push('BIG_ORDER');
     if (parInfo.source !== 'calc') flags.push('NO_USAGE_DATA');
     var fq = toNumber(finalQty);
     if (fq !== null && fq !== order.qty) flags.push('EDITED');
     return flags;
   }
 
+  /**
+   * Suggested quantity for an OPD drug: expected use over one OPD cycle (opd_cycle_days,
+   * default a month), in request units. Staff decide per line whether to request it at all (issue #3).
+   */
+  function opdSuggestion(meanDaily, requestFactor, settings) {
+    var s = settingsWithDefaults(settings);
+    var f = toNumber(requestFactor) || 1;
+    var mean = meanDaily || 0;
+    return mean > 0 ? Math.max(1, ceilSafe(mean * s.opd_cycle_days / f)) : 0;
+  }
+
   // ----------------------------------------------------------------- output
 
-  /** One requisition line for OPD. */
-  function requestLine(drug, qty) {
+  function displayName(drug) {
+    return norm(drug.request_name) || norm(drug.hosxp_name);
+  }
+
+  function displayUnit(drug) {
+    return norm(drug.request_unit) || norm(drug.unit);
+  }
+
+  /**
+   * One line of the main-storage form ใบเบิกหรือใบส่งคืน (issue #4). Quantities in units.
+   * @param {*} onHand  counted on-hand in request units (คงเหลือจากครั้งที่แล้ว)
+   */
+  function mainFormLine(drug, onHand, qty) {
+    var c = toNumber(onHand);
     return {
-      name: norm(drug.request_name) || norm(drug.hosxp_name),
-      qty: qty,
-      unit: norm(drug.request_unit) || norm(drug.unit),
-      remark: 'IPD'
+      item_code: norm(drug.item_code),
+      name: displayName(drug),
+      unit: displayUnit(drug),
+      on_hand: c === null ? '' : c,
+      qty: qty
     };
   }
 
-  /** Numbered tab-separated text of lines with qty > 0, for pasting into OPD's form. */
-  function toTsv(lines) {
+  /**
+   * Tab-separated main-storage lines with qty > 0, in the form's column order:
+   * ลำดับ, หมายเลขพัสดุ, รายการ, หน่วยนับ, คงเหลือจากครั้งที่แล้ว, จำนวนเบิกใหม่.
+   */
+  function mainFormTsv(lines) {
+    return lines
+      .filter(function (l) { return l.qty > 0; })
+      .map(function (l, i) { return [i + 1, l.item_code, l.name, l.unit, l.on_hand, l.qty].join('\t'); })
+      .join('\n');
+  }
+
+  /** One line of the OPD request list. */
+  function opdLine(drug, qty) {
+    return { name: displayName(drug), qty: qty, unit: displayUnit(drug), remark: 'IPD' };
+  }
+
+  /** Numbered tab-separated OPD lines with qty > 0. */
+  function opdTsv(lines) {
     return lines
       .filter(function (l) { return l.qty > 0; })
       .map(function (l, i) { return [i + 1, l.name, l.qty, l.unit, l.remark].join('\t'); })
@@ -293,11 +432,20 @@ var Calc = (function () {
     maxWindowSum: maxWindowSum,
     windowDays: windowDays,
     calcPar: calcPar,
+    parFromStored: parFromStored,
+    minDays: minDays,
+    calcMin: calcMin,
+    minFromStored: minFromStored,
+    supplySource: supplySource,
     classifyDrug: classifyDrug,
+    stockDecision: stockDecision,
     suggestOrder: suggestOrder,
     lineFlags: lineFlags,
-    requestLine: requestLine,
-    toTsv: toTsv
+    opdSuggestion: opdSuggestion,
+    mainFormLine: mainFormLine,
+    mainFormTsv: mainFormTsv,
+    opdLine: opdLine,
+    opdTsv: opdTsv
   };
 })();
 

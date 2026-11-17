@@ -2,6 +2,16 @@
 data/raw/*
 !data/raw/.gitkeep
 
+# Hospital files dropped in the project root (exports, form photos, PRD drafts): never commit
+/*.xls
+/*.xlsx
+/*.csv
+/*.jpg
+/*.jpeg
+/*.png
+/*.docx
+/*.pdf
+
 # clasp: script ID is tied to the private Sheet; keep out of the public repo
 .clasp.json
 .clasprc.json

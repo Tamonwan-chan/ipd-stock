@@ -1,4 +1,4 @@
-// Unit tests for src/Calc.js. Run: npm test  (or: node --test test/)
+// Unit tests for src/Calc.js. Run: npm test
 // Synthetic numbers only — no hospital data in this public repo.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +10,7 @@ test('settingsWithDefaults: fills gaps, parses numeric strings, keeps zeros', ()
   const s = Calc.settingsWithDefaults({ z: '2', delay_days: 0, cycle_days: '' });
   assert.equal(s.z, 2);
   assert.equal(s.delay_days, 0);
-  assert.equal(s.cycle_days, 7);
+  assert.equal(s.cycle_days, 14);
   assert.equal(Calc.settingsWithDefaults().critical_z, 2.33);
 });
 
@@ -63,15 +63,16 @@ test('maxWindowSum', () => {
   assert.equal(Calc.maxWindowSum([1, 2], 9), 3);
 });
 
-test('windowDays: 7 + 1 + 1 + delay', () => {
-  assert.equal(Calc.windowDays({}), 9);
-  assert.equal(Calc.windowDays({ delay_days: 3 }), 12);
+test('windowDays: 14 + 1 + 1 + delay', () => {
+  assert.equal(Calc.windowDays({}), 16);
+  assert.equal(Calc.windowDays({ delay_days: 3 }), 19);
+  assert.equal(Calc.windowDays({ cycle_days: 7 }), 9);
 });
 
 test('calcPar: steady demand has no safety stock', () => {
   const r = Calc.calcPar(Array(90).fill(2), {}, {});
-  assert.equal(r.parCalc, 18); // 2/day × 9 days, sd 0
-  assert.equal(r.par, 18);
+  assert.equal(r.parCalc, 32); // 2/day × 16 days, sd 0
+  assert.equal(r.par, 32);
   assert.equal(r.source, 'calc');
 });
 
@@ -84,7 +85,7 @@ test('calcPar: floating-point noise does not add a unit', () => {
 test('calcPar: safety stock = z·σ·√W', () => {
   const series = [0, 4, 0, 4, 0, 4, 0, 4]; // mean 2, sd 2
   const r = Calc.calcPar(series, {}, { z: 1.65 });
-  assert.equal(r.parCalc, Math.ceil(2 * 9 + 1.65 * 2 * 3)); // 18 + 9.9 → 28
+  assert.equal(r.parCalc, Math.ceil(2 * 16 + 1.65 * 2 * 4)); // 32 + 13.2 → 46
 });
 
 test('calcPar: critical drugs use critical_z and at least the worst window', () => {
@@ -97,7 +98,7 @@ test('calcPar: critical drugs use critical_z and at least the worst window', () 
 });
 
 test('calcPar: override wins (including 0), min_par floors, blanks ignored', () => {
-  const series = Array(90).fill(1); // parCalc 9
+  const series = Array(90).fill(1); // parCalc 16
   assert.deepEqual(
     [Calc.calcPar(series, { par_override: 0 }, {}).par, Calc.calcPar(series, { par_override: 0 }, {}).source],
     [0, 'override']);
@@ -105,7 +106,7 @@ test('calcPar: override wins (including 0), min_par floors, blanks ignored', () 
   const floored = Calc.calcPar(series, { min_par: 20 }, {});
   assert.deepEqual([floored.par, floored.source], [20, 'min_par']);
   const blank = Calc.calcPar(series, { min_par: '', par_override: '' }, {});
-  assert.deepEqual([blank.par, blank.source], [9, 'calc']);
+  assert.deepEqual([blank.par, blank.source], [16, 'calc']);
 });
 
 test('calcPar: no usage gives par 0 with source none', () => {
@@ -132,7 +133,7 @@ test('suggestOrder: blank count is "not counted", 0 is a real count', () => {
 });
 
 test('lineFlags', () => {
-  const parInfo = { par: 18, source: 'calc', mean: 2 }; // weekly use 14
+  const parInfo = { par: 18, source: 'calc', mean: 2 }; // use per cycle 28
   const f = (drug, count, finalQty) =>
     Calc.lineFlags(drug, parInfo, Calc.suggestOrder(parInfo.par, count, 1), finalQty, 1, {});
   assert.deepEqual(f({}, '', ''), ['NOT_COUNTED']);
@@ -140,26 +141,118 @@ test('lineFlags', () => {
   assert.deepEqual(f({}, 10, ''), []);
   assert.deepEqual(f({}, 10, 5), ['EDITED']);
   assert.deepEqual(f({}, 10, 8), []); // same as suggested → not edited
-  // par override far above usual use → order of 40 > 2 × 14
-  const big = Calc.lineFlags({}, { par: 40, source: 'override', mean: 2 }, Calc.suggestOrder(40, 0, 1), '', 1, {});
+  // par override far above usual use → order of 60 > 2 × 28
+  const big = Calc.lineFlags({}, { par: 60, source: 'override', mean: 2 }, Calc.suggestOrder(60, 0, 1), '', 1, {});
   assert.deepEqual(big, ['BIG_ORDER', 'NO_USAGE_DATA']);
+});
+
+test('minDays: lead + 1 + delay', () => {
+  assert.equal(Calc.minDays({}), 2);
+  assert.equal(Calc.minDays({ lead_days: 2, delay_days: 1 }), 4);
+});
+
+test('calcMin: mean·T + z·σ·√T; critical uses critical_z and the worst T days', () => {
+  assert.deepEqual(Calc.calcMin(Array(90).fill(2), {}, {}), { minCalc: 4, T: 2 }); // steady: 2/day × 2 days
+  const series = [0, 4, 0, 4, 0, 4, 0, 4]; // mean 2, sd 2
+  assert.equal(Calc.calcMin(series, {}, {}).minCalc, Math.ceil(2 * 2 + 1.65 * 2 * Math.SQRT2)); // 4 + 4.67 → 9
+  const burst = Array(90).fill(0);
+  burst[10] = 20;
+  burst[11] = 10;
+  assert.ok(Calc.calcMin(burst, {}, {}).minCalc < 30);
+  assert.ok(Calc.calcMin(burst, { critical: true }, {}).minCalc >= 30); // never below the worst 2 days
+  assert.equal(Calc.calcMin(Array(90).fill(0), {}, {}).minCalc, 0);
+});
+
+test('minFromStored: override wins (including 0), never above par', () => {
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, par_calc: 40 }), { min: 6, source: 'calc' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, min_override: '10', par_calc: 40 }), { min: 10, source: 'override' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: 6, min_override: 0, par_calc: 40 }), { min: 0, source: 'override' });
+  assert.deepEqual(Calc.minFromStored({ min_calc: '', par_calc: 40 }), { min: 0, source: 'none' });
+  assert.equal(Calc.minFromStored({ min_calc: 6, par_override: 4 }).min, 4); // capped at par
+});
+
+test('lineFlags: BELOW_MIN when the count is under min (HOSxP units)', () => {
+  const parInfo = { par: 40, source: 'calc', mean: 2, min: 6 };
+  const f = (count, factor) =>
+    Calc.lineFlags({}, parInfo, Calc.suggestOrder(parInfo.par, count, factor), '', factor, { cycle_days: 30 });
+  assert.deepEqual(f(5, 1), ['BELOW_MIN']);
+  assert.deepEqual(f(6, 1), []);
+  assert.deepEqual(f(0.5, 10), ['BELOW_MIN']); // half a 10-unit bottle = 5 units
+  assert.deepEqual(f('', 1), ['NOT_COUNTED']);
+  const noMin = Calc.lineFlags({}, { par: 40, source: 'calc', mean: 2 }, Calc.suggestOrder(40, 0, 1), '', 1, { cycle_days: 30 });
+  assert.deepEqual(noMin, []);
+});
+
+test('supplySource: used at least 1 day in 7 → main storage, else OPD', () => {
+  assert.equal(Calc.supplySource(1, {}), 'MAIN');
+  assert.equal(Calc.supplySource(1 / 7, {}), 'MAIN'); // exactly weekly
+  assert.equal(Calc.supplySource(0.14, {}), 'OPD');
+  assert.equal(Calc.supplySource(0, {}), 'OPD');
+  assert.equal(Calc.supplySource(0.1, { min_use_freq: 0.1 }), 'MAIN');
 });
 
 test('classifyDrug', () => {
   const st = (useFreq, total = 100) => ({ useFreq, total });
-  assert.equal(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)).tier, 'placeholder');
-  assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**' }, st(0.01)), { stocked: true, critical: true, tier: 'critical' });
+  assert.deepEqual(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)),
+    { stocked: false, critical: false, tier: 'placeholder', source: null });
+  assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**' }, st(0.01)),
+    { stocked: true, critical: true, tier: 'critical', source: 'MAIN' });
   assert.equal(Calc.classifyDrug({ name: 'Costly inj', unit_price: 1000 }, st(0.2, 10)).tier, 'expensive');
   assert.equal(Calc.classifyDrug({ name: 'Costly but daily', unit_price: 1000 }, st(0.9, 10)).tier, 'regular');
-  assert.equal(Calc.classifyDrug({ name: 'Weekly', unit_price: 1 }, st(1 / 7)).tier, 'regular');
-  assert.equal(Calc.classifyDrug({ name: 'Rare', unit_price: 1 }, st(0.05)).tier, 'rare');
+  assert.deepEqual(Calc.classifyDrug({ name: 'Weekly', unit_price: 1 }, st(1 / 7)),
+    { stocked: true, critical: false, tier: 'regular', source: 'MAIN' });
+  assert.deepEqual(Calc.classifyDrug({ name: 'Rare', unit_price: 1 }, st(0.05)),
+    { stocked: false, critical: false, tier: 'opd', source: 'OPD' });
 });
 
-test('requestLine and toTsv', () => {
+test('opdSuggestion: one OPD cycle (a month) of use, at least 1 when used', () => {
+  assert.equal(Calc.opdSuggestion(0.5, 1, {}), 15);
+  assert.equal(Calc.opdSuggestion(0.01, 1, {}), 1);
+  assert.equal(Calc.opdSuggestion(0, 1, {}), 0);
+  assert.equal(Calc.opdSuggestion(30, 240, {}), 4); // 900 ml → 4 bottles of 240 ml
+});
+
+test('opdSuggestion: follows opd_cycle_days, not the main-storage cycle_days', () => {
+  assert.equal(Calc.opdSuggestion(0.5, 1, { opd_cycle_days: 28, cycle_days: 7 }), 14);
+  assert.equal(Calc.opdSuggestion(0.5, 1, { cycle_days: 7 }), 15);
+});
+
+test('mainFormLine and mainFormTsv: form column order, units', () => {
+  const vit = { hosxp_name: '(NED)VIT B complex tab(-)', unit: 'เม็ด', request_name: 'Vitamin B complex' };
+  const kcl = { hosxp_name: 'KCl syr. (คิดต่อ ml.) (C)', unit: '1 ml.', request_unit: 'ขวด', item_code: 'A12' };
+  const lines = [Calc.mainFormLine(vit, 120, 1500), Calc.mainFormLine(kcl, 0.5, 0), Calc.mainFormLine(kcl, '', 3)];
+  assert.deepEqual(lines[0], { item_code: '', name: 'Vitamin B complex', unit: 'เม็ด', on_hand: 120, qty: 1500 });
+  assert.equal(Calc.mainFormTsv(lines),
+    '1\t\tVitamin B complex\tเม็ด\t120\t1500\n2\tA12\tKCl syr. (คิดต่อ ml.) (C)\tขวด\t\t3');
+});
+
+test('opdLine and opdTsv', () => {
   const kcl = { hosxp_name: 'KCl syr. (คิดต่อ ml.) (C)', unit: '1 ml.', request_unit: 'ขวด', request_name: '' };
   const vit = { hosxp_name: '(NED)VIT B complex tab(-)', unit: 'เม็ด', request_name: 'Vitamin B complex' };
-  const lines = [Calc.requestLine(kcl, 3), Calc.requestLine({ hosxp_name: 'X', unit: 'เม็ด' }, 0), Calc.requestLine(vit, 1500)];
+  const lines = [Calc.opdLine(kcl, 3), Calc.opdLine({ hosxp_name: 'X', unit: 'เม็ด' }, 0), Calc.opdLine(vit, 1500)];
   assert.deepEqual(lines[0], { name: 'KCl syr. (คิดต่อ ml.) (C)', qty: 3, unit: 'ขวด', remark: 'IPD' });
-  assert.equal(Calc.toTsv(lines),
+  assert.equal(Calc.opdTsv(lines),
     '1\tKCl syr. (คิดต่อ ml.) (C)\t3\tขวด\tIPD\n2\tVitamin B complex\t1500\tเม็ด\tIPD');
+});
+
+test('classifyDrug: critical column wins over the HAD name tag', () => {
+  const st = { useFreq: 1, total: 10 };
+  assert.equal(Calc.classifyDrug({ name: 'Warfarin *HAD*', critical: false }, st).tier, 'regular');
+  assert.equal(Calc.classifyDrug({ name: 'Plain', critical: true }, st).tier, 'critical');
+  assert.equal(Calc.classifyDrug({ name: 'X *HAD*', critical: '' }, st).tier, 'critical');
+});
+
+test('stockDecision: pharmacist source and par win; expensive goes to OPD until it has a par', () => {
+  const cls = (tier, source, stocked = false, critical = false) => ({ tier, source, stocked, critical });
+  assert.deepEqual(Calc.stockDecision({}, cls('placeholder', null)), { source: null, stocked: false });
+  assert.deepEqual(Calc.stockDecision({ source: 'OPD' }, cls('critical', 'MAIN', true, true)), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('regular', 'MAIN', true)), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({ source: 'opd' }, cls('regular', 'MAIN', true)), { source: 'OPD', stocked: false });
+  assert.deepEqual(Calc.stockDecision({ source: 'MAIN' }, cls('opd', 'OPD')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('expensive', 'MAIN')), { source: 'OPD', stocked: false });
+  assert.deepEqual(Calc.stockDecision({ min_par: 2 }, cls('expensive', 'MAIN')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({ par_override: 0 }, cls('expensive', 'OPD')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({}, cls('opd', 'OPD')), { source: 'OPD', stocked: false });
+  assert.deepEqual(Calc.stockDecision({ min_par: 5 }, cls('opd', 'OPD')), { source: 'MAIN', stocked: true });
+  assert.deepEqual(Calc.stockDecision({ min_par: 5, source: 'OPD' }, cls('opd', 'OPD')), { source: 'OPD', stocked: false });
 });
