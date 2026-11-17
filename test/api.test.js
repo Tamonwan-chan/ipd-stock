@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const Db = require('../src/Db.js');
 const Api = require('../src/Api.js');
+const Import = require('../src/Import.js');
 const { FakeSpreadsheet } = require('./fake-spreadsheet.js');
 
 function setup() {
@@ -49,6 +50,20 @@ test('state: drugs with par and source, usage window, no round yet; JSON only', 
   assert.deepEqual([d['Busy tab'].min, d['Busy tab'].min_source], [20, 'calc']); // 10/day × 2 days, steady
   // nothing that google.script.run can't send
   assert.deepEqual(JSON.parse(JSON.stringify(st)), st);
+});
+
+test('state: source NONE (billing-only row) is on neither the count nor the OPD list', () => {
+  const ss = setup();
+  const drugs = Db.readTable('Drugs', ss);
+  const slow = drugs.find(x => x.hosxp_name === 'Slow tab');
+  const busy = drugs.find(x => x.hosxp_name === 'Busy tab');
+  slow.source = 'NONE';
+  busy.source = 'NONE';
+  Db.updateFields('Drugs', [slow, busy], ['source'], ss);
+  Import.recompute(ss);
+  const d = Object.fromEntries(Api.state(null, ss).drugs.map(x => [x.hosxp_name, x]));
+  assert.deepEqual([d['Slow tab'].source, d['Slow tab'].stocked], ['', false]);
+  assert.deepEqual([d['Busy tab'].source, d['Busy tab'].stocked], ['', false]);
 });
 
 test('round: start, save lines (server recomputes), reopen same round, approve locks', () => {

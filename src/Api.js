@@ -62,7 +62,8 @@ var Api = (function () {
       var mn = C.minFromStored(d);
       var factor = C.toNumber(d.request_factor) || 1;
       var manual = String(d.source || '').trim().toUpperCase();
-      var source = manual === 'MAIN' || manual === 'OPD' ? manual : (d.source_calc || '');
+      // NONE: billing-only HOSxP rows, requested from neither main storage nor OPD.
+      var source = manual === 'NONE' ? '' : manual === 'MAIN' || manual === 'OPD' ? manual : (d.source_calc || '');
       var mean = C.toNumber(d.mean_daily) || 0;
       return {
         drug_id: d.drug_id,

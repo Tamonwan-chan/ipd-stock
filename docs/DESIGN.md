@@ -25,7 +25,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | One pharmacy technician counts and orders, 30–60 min, timing unpredictable (Q7) | Counting must be fast, resumable, and work at the shelf → mobile web page with autosave. Keep the stock list short (§5.2) |
 | IPD has no usable computer/printer; prints at the warehouse or OPD (Q10) | Everything runs in a browser; output works from any PC |
 | Pharmacist reviews but often can't check every line (Q8) | Review screen shows **exceptions first** |
-| IPD requests from main storage every 2 weeks, independent of OPD's weekly cycle (16 Nov) | Demand window = count day through next delivery = 16 days (§5). Count and delivery days still to confirm |
+| IPD requests from main storage every 2 weeks, independent of the monthly OPD requests (16–17 Nov) | Demand window = count day through the delivery after next = 16 days + `delay_days` (§5). Count Tuesday morning, delivery Wednesday afternoon |
 | 11 HAD injectables must never run out (Q4) | Per-drug `critical` flag → par from the worst observed window + minimum par |
 | Main storage's form has a unit column (หน่วยนับ); IPD requests in units, and pack sizes change too often to track (16 Nov) | No box rounding and no pack sizes; output in units (whole bottles for liquids dispensed per ml) |
 | Low-use drugs are fetched from OPD, not requested from main storage (16 Nov), once a month (17 Nov) | Use frequency decides main storage vs OPD; OPD suggestion = a month of use (§5.2) |
@@ -75,7 +75,7 @@ Each column has a type. Text columns get the plain-text format so Sheets doesn't
 | :- | :- | :- |
 | `cycle_days` | 14 | days between main-storage requisitions (every 2 weeks) |
 | `lead_days` | 1 | count day → delivery day: count Tuesday morning, delivery Wednesday afternoon (IPD, 17 Nov) |
-| `delay_days` | 0 | extra days for late delivery, added to the window. **Decision needed** (§5.3) |
+| `delay_days` | 0 | extra days for late delivery, added to the window. IPD chose **5** for every drug (17 Nov): set 5 in the Sheet's Settings (§5.3) |
 | `history_days` | 90 | usage history used to compute par |
 | `z` | 1.65 | safety factor, normal drugs (nominal 95%; ~93% achieved on real data) |
 | `critical_z` | 2.33 | safety factor, `critical` drugs (nominal 99%) |
@@ -97,7 +97,7 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `request_unit` | ขวด | optional, unit to count and request in when it differs from `unit`; blank = `unit` |
 | `request_factor` | 240 | `unit`s per `request_unit` (KCl syrup: 240 ml per bottle); blank = 1 |
 | `request_name` | Vitamin B complex | optional, name to print on the requisition; blank = `hosxp_name` |
-| `source` | MAIN | pharmacist's choice: `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional) / blank = follow `source_calc` |
+| `source` | MAIN | pharmacist's choice: `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional) / `NONE` (requested from neither: billing-only rows such as `Salbutamol solution (คิดเป็น มล.)`) / blank = follow `source_calc` |
 | `item_code` | | main storage's item code (หมายเลขพัสดุ) if one exists (§9) |
 | `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
 | `stocked` | TRUE | counted and ordered from main storage. Written by recompute from `source`, the rule and `critical` (§6); change `source` rather than this column |
@@ -200,7 +200,7 @@ use_freq ≥ min_use_freq   →  source = MAIN  (counted, par-based, on the main
 otherwise                 →  source = OPD   (optional OPD list)
 ```
 
-Overrides, in order (`Calc.stockDecision`): `critical` (HAD) drugs are always `MAIN`; the pharmacist's `source` (`MAIN`/`OPD`) wins; a `min_par` or `par_override` makes a drug `MAIN` (the pharmacist wants it on the shelf); expensive, infrequent drugs are `OPD` until they get one of those.
+Overrides, in order (`Calc.stockDecision`): `critical` (HAD) drugs are always `MAIN` (confirmed by IPD staff, 17 Nov); the pharmacist's `source` (`MAIN`/`OPD`/`NONE`) wins; a `min_par` or `par_override` makes a drug `MAIN` (the pharmacist wants it on the shelf); expensive, infrequent drugs are `OPD` until they get one of those.
 
 The 1-pack rule it replaces (main storage when the busiest 2 weeks used ≥ 80% of a pack) was dropped on 16 Nov: main storage's pack sizes change often, and IPD requests in units anyway. With no pack sizes filled in, the frequency rule was already deciding every drug, so the stock list didn't change (191 drugs on the Aug–Oct data; 136 go to the OPD list).
 
@@ -228,7 +228,7 @@ Staff asked for 3–5 extra days in case of late delivery (Q5). The safety stock
 | 3 | 4.6% | 135k THB | 102k THB | 6.6% | 199k THB | 140k THB |
 | 5 | 3.5% | 154k THB | 121k THB | 4.7% | 216k THB | 157k THB |
 
-IPD staff (17 Nov): the buffer applies to **every drug**, not only critical ones, so every shelf also covers refilling the emergency boxes used on each shift. The number of days (3, 4 or 5) is still to choose.
+IPD staff (17 Nov): the buffer applies to **every drug**, not only critical ones, so every shelf also covers refilling the emergency boxes used on each shift. They chose **5 days** (17 Nov).
 
 Extra days also cut shortfalls when deliveries are on time, because they add stock. Each day costs roughly 9–10k THB of extra stock on either cycle. Decide with IPD whether late deliveries happen often enough to pay for that, or whether `delay_days` applies to `critical` drugs only.
 
@@ -266,6 +266,7 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 **`stocked` is written by recompute** (`Calc.stockDecision`); the pharmacist steers it through `source`:
 - `source` blank: the use-frequency rule decides (`source_calc`).
 - `source` = `OPD` → not stocked; `MAIN` → stocked, whatever the rule says.
+- `source` = `NONE` → on neither list. For HOSxP rows that only carry a charge, e.g. nebuliser solution billed per ml on the ward (17 Nov).
 - `min_par` or `par_override` set → stocked.
 - `critical` drugs are always stocked. Expensive, infrequent drugs are stocked only once they have a `min_par` or `par_override` (or `source = MAIN`).
 
@@ -324,17 +325,22 @@ Resolved:
 - OPD requests: once a month → `opd_cycle_days = 30` (17 Nov).
 - OPD list: IPD's current list (79 drugs) checked against Aug–Oct usage: 33 move to main storage, 4 rarely used HAD injections for the pharmacist to decide, 28 stay with OPD, 14 unused in the period (#3, 17 Nov).
 - Targets for the trial month (PRD §8): trips to OPD at most 1–2 a week (aim 0–1); requisition work at most 20–30 minutes per round.
+- Delivery delay: `delay_days = 5`, on every drug; main-storage cycle confirmed every 2 weeks (17 Nov).
+- HAD drugs always come from main storage (17 Nov). Only the HAD-tagged forms: digoxin injection is HAD, digoxin tablet is not.
+- OPD list after staff review (17 Nov): the 33 move to main storage except clozapine 100 mg, ibuprofen 200 mg, bisoprolol 5 mg and S.M.W (`source = OPD`); atropine injection and budesonide nasal spray also move (`source = MAIN`); the 4 HAD injections stay in main storage.
+- Per-ml rows `Berodual solution (คิดเป็น มล.…)`, `Salbutamol solution (คิดเป็น มล.)` and lidocaine 2% inj are charges only, not drug taken from stock → `source = NONE` (17 Nov).
+- Issue sizes: lidocaine viscous comes from main storage in 100 ml bottles (HOSxP counts 15 ml bottles → `request_factor` 100/15); S.M.W is requested by the 3.750 L gallon (HOSxP counts 120 ml bottles → `request_factor` 31.25). `Syrup (คิดเป็น ml)`: 450 ml bottle.
 
 Open:
 1. **Accounts and devices.** Do the technician and pharmacist have Google accounts, and will they count on a phone? (Decides §7.)
 2. ~~Lead time~~ resolved above.
-3. **Delivery delay.** Staff want the buffer on all drugs (17 Nov). Choose `delay_days`: 3, 4 or 5 (§5.3). Staff also wrote "weekly requisition" in that answer: confirm the main-storage cycle is still every 2 weeks.
-4. **Bottle sizes.** Per-ml drugs in HOSxP: KCl syrup (240 ml, confirmed), Berodual solution, Salbutamol solution, lidocaine 2% inj, adrenaline 1 mg/ml (1 ml = 1 ampoule), and a generic `Syrup (คิดเป็น ml)` row. Need the bottle/vial size of each. Staff answers (17 Nov): `Syrup (คิดเป็น ml)` = 450 ml bottle. Lidocaine viscous "100 ml" and S.M.W "3.750 L" need checking: HOSxP already counts them per 15-ml and 120-ml bottle, so these may be main storage's issue sizes. Still missing: Berodual solution, Salbutamol solution, lidocaine 2% inj.
+3. ~~Delivery delay~~ resolved above (5 days).
+4. ~~Bottle sizes~~ resolved above. Adrenaline 1 mg/ml: 1 ml = 1 ampoule.
 5. **Multiple locations.** Is any drug kept in more than one place? If yes, counting needs one row per drug-location.
 6. **Drug code.** Can IT add HOSxP `icode` to the export? Names change and have typos; a code is a safer key.
-7. **Expensive, infrequent drugs.** IPD pharmacist (17 Nov): keep about 5 days of use at the maximum dose per drug. Next: list each drug's maximum daily dose → `min_par`, for the pharmacist to confirm (§5.2).
-8. **Pack sizes.** 26 known so far (issue slip and requisition form). Where do the rest come from: main storage's item list? (#2)
-9. ~~OPD list~~ resolved above. Pharmacist to confirm the 5 borderline drugs (used on exactly 14 of 92 days) and deferiprone (GPO-L-ONE: shelf stock or patient-specific).
-10. **Rule details.** HAD always main storage? 4 HAD injections on IPD's OPD list are used on 1–3 days in 3 months (calcium gluconate, dopamine, adenosine, digoxin). Is weekly the right line between main storage and OPD? (#3, §5.2)
+7. **Expensive, infrequent drugs.** IPD pharmacist (17 Nov): keep about 5 days of use at the maximum dose per drug. Draft table in #5, waiting for the pharmacist; enter the result as `par_override` (`min_par` is only a floor) (§5.2).
+8. ~~Pack sizes~~ not used (#2, closed).
+9. ~~OPD list~~ resolved above. Deferiprone (GPO-L-ONE) moves with the 33 → `source = MAIN` until the pharmacist sets its `par_override`.
+10. ~~Rule details~~ resolved above: HAD always main storage; weekly use is the line.
 11. **หมายเลขพัสดุ.** Does main storage have an item code per drug? (#4)
 12. **Page layout.** The paper form has ~19 lines per sheet: number the printout's pages to match, or print one continuous list? (#4)

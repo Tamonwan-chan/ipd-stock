@@ -107,7 +107,7 @@ var Schema = (function () {
 
   /** Allowed values for coded columns. */
   var ENUMS = {
-    source: ['MAIN', 'OPD'],
+    source: ['MAIN', 'OPD', 'NONE'],
     source_calc: ['MAIN', 'OPD'],
     location: ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา'],
     status: ['COUNTING', 'REVIEW', 'APPROVED'],

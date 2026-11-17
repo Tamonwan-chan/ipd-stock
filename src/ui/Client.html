@@ -193,7 +193,8 @@
       stat(opd, 'ใช้ไม่บ่อย: ขอจาก OPD') +
       '</div>' +
       '<p class="muted small">ยาที่มีการใช้อย่างน้อย 1 ใน ' + Math.round(1 / st.settings.min_use_freq) +
-      ' วัน → เบิกจากคลัง น้อยกว่านั้น → ขอจาก OPD เภสัชเปลี่ยนได้ในคอลัมน์ source ของแท็บ Drugs</p>';
+      ' วัน → เบิกจากคลัง น้อยกว่านั้น → ขอจาก OPD เภสัชเปลี่ยนได้ในคอลัมน์ source ของแท็บ Drugs ' +
+      '(MAIN = เบิกคลัง, OPD = ขอ OPD, NONE = ไม่ต้องเบิก เช่น แถวคิดราคาเป็น มล.)</p>';
   }
   function stat(n, label) { return '<div class="stat"><b>' + fmt(n, 0) + '</b><span class="muted small">' + esc(label) + '</span></div>'; }
 
