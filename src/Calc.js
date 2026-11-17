@@ -109,9 +109,12 @@ var Calc = (function () {
     return /HAD/i.test(String(name));
   }
 
-  /** Placeholder rows such as 'YA.........' with unit '.'. */
-  function isPlaceholder(name, unit) {
-    return /\.{5,}/.test(String(name)) || norm(unit) === '.';
+  /**
+   * Placeholder rows such as 'YA.........'. Decided by the name only: real drugs can have
+   * unit '.' in HOSxP (e.g. 'Magnesium So4 (B),50% inj*HAD*', 'Ritonavir (Napha)').
+   */
+  function isPlaceholder(name) {
+    return /\.{5,}/.test(String(name));
   }
 
   // ------------------------------------------------------------ usage stats
@@ -275,7 +278,7 @@ var Calc = (function () {
    */
   function classifyDrug(d, stats, settings) {
     var s = settingsWithDefaults(settings);
-    if (isPlaceholder(d.name, d.unit)) return { stocked: false, critical: false, tier: 'placeholder', source: null };
+    if (isPlaceholder(d.name)) return { stocked: false, critical: false, tier: 'placeholder', source: null };
     // HAD drugs must never run out: always main storage (open question in issue #3).
     // d.critical (the Drugs column) wins when given; otherwise the HAD tag in the name decides.
     var critical = d.critical === undefined || d.critical === null || d.critical === '' ? isCriticalName(d.name) : !!d.critical;

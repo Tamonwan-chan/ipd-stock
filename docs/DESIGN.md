@@ -261,7 +261,7 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
    - Sums same-day rows, drops zero quantities, matches **Drugs** by `hosxp_name + strength + unit`, and creates new drugs with `critical` ticked when the name has the `HAD` tag. Updates `unit_price` to the latest price.
    - Replaces **UsageDaily** rows within the imported date range, clears **Import** (header kept), and runs step 3.
 3. Menu **IPD › คำนวณยอดที่ควรมีใหม่** (`Import.recompute`): uses the last `history_days` of **UsageDaily** up to the latest usage date (not before the first one), and writes `use_freq`, `mean_daily`, `source_calc`, `stocked`, `par_calc`, `min_calc`, `par_updated`. The summary lists expensive drugs needing a `min_par` and drugs whose `source` differs from the rule.
-4. Pharmacist reviews `source`, `critical`, `min_par`, `par_override`, `min_override` and `location` in **Drugs**, then reruns step 3. Placeholder rows such as `YA....` (unit `.`) stay unstocked.
+4. Pharmacist reviews `source`, `critical`, `min_par`, `par_override`, `min_override` and `location` in **Drugs**, then reruns step 3. Placeholder rows such as `YA....` stay unstocked. They are recognised by the name only: real drugs can have unit `.` in HOSxP (magnesium sulfate 50% inj, a HAD drug; ritonavir).
 
 **`stocked` is written by recompute** (`Calc.stockDecision`); the pharmacist steers it through `source`:
 - `source` blank: the use-frequency rule decides (`source_calc`).

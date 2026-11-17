@@ -34,6 +34,7 @@ test('drugKey and name rules', () => {
   assert.ok(Calc.isCriticalName('KCl inj (C) **HAD**'));
   assert.ok(!Calc.isCriticalName('Paracetamol'));
   assert.ok(Calc.isPlaceholder('YA..........', '.'));
+  assert.ok(!Calc.isPlaceholder('Magnesium So4 (B),50% inj*HAD*', '.')); // real drug, unit '.' in HOSxP
   assert.ok(!Calc.isPlaceholder('Amlodipine', 'เม็ด'));
 });
 
@@ -195,6 +196,7 @@ test('classifyDrug', () => {
   const st = (useFreq, total = 100) => ({ useFreq, total });
   assert.deepEqual(Calc.classifyDrug({ name: 'YA.......', unit: '.' }, st(1)),
     { stocked: false, critical: false, tier: 'placeholder', source: null });
+  assert.equal(Calc.classifyDrug({ name: 'Magnesium So4 (B),50% inj*HAD*', unit: '.' }, st(0.01)).tier, 'critical');
   assert.deepEqual(Calc.classifyDrug({ name: 'KCl inj **HAD**' }, st(0.01)),
     { stocked: true, critical: true, tier: 'critical', source: 'MAIN' });
   assert.equal(Calc.classifyDrug({ name: 'Costly inj', unit_price: 1000 }, st(0.2, 10)).tier, 'expensive');

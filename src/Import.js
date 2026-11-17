@@ -191,7 +191,7 @@ var Import = (function () {
       if (to === null || u.date > to) to = u.date;
       if (first === null || u.date < first) first = u.date;
     });
-    var report = { from: null, to: to, drugs: drugs.length, stocked: 0, source: {}, expensive: [], overridden: [] };
+    var report = { from: null, to: to, drugs: drugs.length, stocked: 0, source: {}, expensive: [], overridden: [], none: [] };
     if (!drugs.length) return report;
     // Window: the last history_days, but not before the data starts (days before the
     // first import would otherwise count as zero use).
@@ -225,8 +225,9 @@ var Import = (function () {
       if (dec.stocked) report.stocked++;
       var key = dec.source || 'none';
       report.source[key] = (report.source[key] || 0) + 1;
-      if (cls.tier === 'expensive' && !dec.stocked) report.expensive.push(d.hosxp_name);
+      if (cls.tier === 'expensive' && dec.source === 'OPD') report.expensive.push(d.hosxp_name);
       var manual = String(d.source || '').trim().toUpperCase();
+      if (manual === 'NONE' && !dec.source) report.none.push(d.hosxp_name);
       if ((manual === 'MAIN' || manual === 'OPD') && cls.source && manual !== cls.source && !cls.critical) {
         report.overridden.push(d.hosxp_name);
       }

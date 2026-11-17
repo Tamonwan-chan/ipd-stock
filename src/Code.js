@@ -84,6 +84,7 @@ function recomputeLines_(r) {
   ];
   if (r.expensive.length) lines.push('ยาราคาสูง ใช้ไม่บ่อย (ตอนนี้ให้ขอจาก OPD) ถ้าจะสต็อก ให้เภสัชใส่ par_override (ยอดสูงสุด) หรือ source = MAIN: ' + listSome_(r.expensive));
   if (r.overridden.length) lines.push('source ที่เภสัชตั้งไว้ต่างจากเกณฑ์ความถี่การใช้: ' + listSome_(r.overridden));
+  if (r.none && r.none.length) lines.push('ไม่ต้องเบิก (source = NONE): ' + listSome_(r.none));
   return lines;
 }
 
