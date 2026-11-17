@@ -66,6 +66,29 @@ test('state: source NONE (billing-only row) is on neither the count nor the OPD 
   assert.deepEqual([d['Busy tab'].source, d['Busy tab'].stocked], ['', false]);
 });
 
+test('state: expensive, infrequent drug is on the OPD list until the pharmacist sets a par', () => {
+  const ss = new FakeSpreadsheet();
+  Db.ensureSchema(ss);
+  const rows = [];
+  let n = 2;
+  for (let day = 1; day <= 28; day++) {
+    rows.push([n++, `${day}/8/2026`, 'Busy tab', '10 mg.', 'เม็ด', 10, 1]);
+    // used on 8 of 28 days (≥ weekly, < half) at 1000 THB each → expensive tier
+    if (day % 7 === 0 || day % 7 === 3) rows.push([n++, `${day}/8/2026`, 'Pricey inj', '1 g.', 'Vial', 2, 1000]);
+  }
+  assert.equal(Api.importFile(rows, ss).ok, true);
+  let p = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Pricey inj');
+  assert.deepEqual([p.source, p.stocked], ['OPD', false]);
+
+  const d = Db.readTable('Drugs', ss).find(x => x.hosxp_name === 'Pricey inj');
+  assert.equal(d.source_calc, 'MAIN'); // the frequency rule alone would stock it
+  d.par_override = 6;
+  Db.updateFields('Drugs', [d], ['par_override'], ss);
+  Import.recompute(ss);
+  p = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Pricey inj');
+  assert.deepEqual([p.source, p.stocked, p.par], ['MAIN', true, 6]);
+});
+
 test('round: start, save lines (server recomputes), reopen same round, approve locks', () => {
   const ss = setup();
   const r = Api.startRound(ss);

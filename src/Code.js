@@ -44,6 +44,8 @@ function setupSheets() {
     lines.push('เพิ่มคอลัมน์ใน ' + t + ': ' + r.addedColumns[t].join(', '));
   });
   if (r.addedSettings.length) lines.push('เพิ่มค่าตั้งต้นใน Settings: ' + r.addedSettings.join(', '));
+  if (r.updatedNotes.length) lines.push('ปรับคำอธิบายใน Settings: ' + r.updatedNotes.join(', '));
+  if (r.unusedSettings.length) lines.push('ค่าใน Settings ที่โปรแกรมไม่ใช้แล้ว (ลบแถวได้): ' + r.unusedSettings.join(', '));
   SpreadsheetApp.getUi().alert(lines.join('\n'));
 }
 
@@ -80,7 +82,7 @@ function recomputeLines_(r) {
     'เบิกจากคลัง (MAIN) ' + (src.MAIN || 0) + ' · ขอจาก OPD ' + (src.OPD || 0),
     'ต้องนับและเบิก (stocked) ' + r.stocked + ' รายการ'
   ];
-  if (r.expensive.length) lines.push('ยาราคาสูง ใช้ไม่บ่อย (ตอนนี้ให้ขอจาก OPD) ถ้าจะสต็อก ให้เภสัชกำหนด min_par: ' + listSome_(r.expensive));
+  if (r.expensive.length) lines.push('ยาราคาสูง ใช้ไม่บ่อย (ตอนนี้ให้ขอจาก OPD) ถ้าจะสต็อก ให้เภสัชใส่ par_override (ยอดสูงสุด) หรือ source = MAIN: ' + listSome_(r.expensive));
   if (r.overridden.length) lines.push('source ที่เภสัชตั้งไว้ต่างจากเกณฑ์ความถี่การใช้: ' + listSome_(r.overridden));
   return lines;
 }

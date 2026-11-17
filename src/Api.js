@@ -62,8 +62,10 @@ var Api = (function () {
       var mn = C.minFromStored(d);
       var factor = C.toNumber(d.request_factor) || 1;
       var manual = String(d.source || '').trim().toUpperCase();
-      // NONE: billing-only HOSxP rows, requested from neither main storage nor OPD.
-      var source = manual === 'NONE' ? '' : manual === 'MAIN' || manual === 'OPD' ? manual : (d.source_calc || '');
+      // Source in effect, consistent with `stocked` (written by recompute via Calc.stockDecision):
+      // stocked → MAIN; NONE (billing-only rows) or placeholder (no source_calc) → neither list;
+      // anything else not stocked → OPD, including expensive drugs the rule would put in MAIN.
+      var source = manual === 'NONE' ? '' : d.stocked ? 'MAIN' : (manual === 'OPD' || d.source_calc) ? 'OPD' : '';
       var mean = C.toNumber(d.mean_daily) || 0;
       return {
         drug_id: d.drug_id,

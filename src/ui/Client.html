@@ -326,7 +326,7 @@
         '<li>ยาใหม่ ' + r.newDrugs.length + ' รายการ · ปรับราคา ' + r.priceUpdates + ' รายการ</li>' +
         '<li>เบิกจากคลัง ' + (rc.source.MAIN || 0) + ' · ขอจาก OPD ' + (rc.source.OPD || 0) +
         ' · ต้องนับ ' + rc.stocked + ' รายการ</li>' +
-        (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ตอนนี้ให้ขอจาก OPD ถ้าจะสต็อก ให้เภสัชกำหนด min_par ในแท็บ Drugs</li>' : '') +
+        (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ตอนนี้ให้ขอจาก OPD ถ้าจะสต็อก ให้เภสัชใส่ par_override (ยอดสูงสุด) หรือ source = MAIN ในแท็บ Drugs</li>' : '') +
         '</ul></div>';
       return reload();
     }).catch(function (e) {
