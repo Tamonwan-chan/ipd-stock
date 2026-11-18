@@ -314,9 +314,8 @@ var Api = (function () {
     var drugs = {};
     D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
 
-    var old = {};
-    D.readTable('RoundLines', ss).forEach(function (l) { if (l.round_id === roundId) old[l.drug_id] = l; });
-    var out = {}, rows = [], packs = {}, logs = [];
+    // Not logged here: this runs on every autosave. approveRound logs the final lines once.
+    var out = {}, rows = [], packs = {};
     edits.forEach(function (e) {
       var d = drugs[e.drug_id];
       if (!d) throw new Error('ไม่พบยา ' + e.drug_id);
@@ -328,8 +327,6 @@ var Api = (function () {
           final_qty: '', boxes: '', pack_size: '', change_reason: '', flags: '' };
         rows.push(cl);
         out[e.drug_id] = lineFromRow_(cl);
-        var was = old[e.drug_id] ? old[e.drug_id].on_hand : '';
-        if (show_(was) !== show_(cl.on_hand)) logs.push(['นับยา', drugLabel_(d), 'คงเหลือ ' + show_(was) + ' → ' + show_(cl.on_hand)]);
         return;
       }
       var p = C.parFromStored(d);
@@ -356,17 +353,8 @@ var Api = (function () {
       };
       rows.push(line);
       out[e.drug_id] = lineFromRow_(line);
-      var o = old[e.drug_id] || {}, diff = [];
-      if (show_(o.on_hand) !== show_(line.on_hand)) diff.push('คงเหลือ ' + show_(o.on_hand) + ' → ' + show_(line.on_hand));
-      if (show_(o.final_qty) !== show_(line.final_qty)) diff.push('เบิกจริง ' + show_(o.final_qty) + ' → ' + show_(line.final_qty));
-      if (show_(o.boxes) !== show_(line.boxes) || show_(o.pack_size) !== show_(line.pack_size)) {
-        diff.push('กล่อง ' + show_(o.boxes) + '×' + show_(o.pack_size) + ' → ' + show_(line.boxes) + '×' + show_(line.pack_size));
-      }
-      if ((o.change_reason || '') !== line.change_reason) diff.push('เหตุผล: ' + show_(line.change_reason));
-      if (diff.length) logs.push(['นับ/เบิก', drugLabel_(d), diff.join('; ')]);
     });
     D.upsert('RoundLines', rows, ss);
-    log_(logs.map(function (x) { x[2] = 'รอบ ' + roundId + ': ' + x[2]; return x; }), ss);
     var changed = Object.keys(packs).map(function (id) { return packs[id]; });
     if (changed.length) D.updateFields('Drugs', changed, ['pack_size'], ss);
     if (!round.counted_by) D.updateFields('Rounds', [{ _row: round._row, counted_by: actor_() }], ['counted_by'], ss);
@@ -534,7 +522,25 @@ var Api = (function () {
     round.approved_at = now_();
     round.reviewed_by = actor_();
     D.updateFields('Rounds', [round], ['status', 'approved_at', 'reviewed_by'], ss);
-    log_([['อนุมัติรอบ', roundId, '']], ss);
+    // The change log gets the final count and request of each line here, once,
+    // not every autosave while staff type.
+    var drugs = {};
+    D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
+    var counted = 0, requested = 0, logs = [];
+    D.readTable('RoundLines', ss).forEach(function (l) {
+      if (l.round_id !== roundId) return;
+      var parts = [];
+      if (l.on_hand !== '' && l.on_hand !== null) { counted++; parts.push('คงเหลือ ' + l.on_hand); }
+      if (l.suggested_qty !== '' && l.suggested_qty !== null) parts.push('ควรเบิก ' + l.suggested_qty);
+      if (l.final_qty !== '' && l.final_qty !== null) {
+        if (Number(l.final_qty) > 0) requested++;
+        parts.push('เบิกจริง ' + l.final_qty + (l.boxes !== '' && l.boxes !== null ? ' (' + l.boxes + '×' + l.pack_size + ')' : ''));
+      }
+      if (l.change_reason) parts.push('เหตุผล: ' + l.change_reason);
+      if (parts.length) logs.push(['นับ/เบิก', drugLabel_(drugs[l.drug_id]) || l.drug_id, 'รอบ ' + roundId + ': ' + parts.join('; ')]);
+    });
+    // Summary row last, so it heads the newest-first log view.
+    log_(logs.concat([['อนุมัติรอบ', roundId, 'นับ ' + counted + ' รายการ, เบิก ' + requested + ' รายการ']]), ss);
     return roundInfo_(round);
   }
 

@@ -139,7 +139,7 @@ Both OPD tabs and the receiving columns are created on first use (`Db.ensureColu
 
 **Users** (web app logins, `Auth.js`): key `username`; `name`, `role` (`staff` / `admin`), `active`, `pw_salt`, `pw_hash` (salted SHA-256, never the password), `created_at`, `last_login`. An older Sheet's `email` column is left alone and ignored.
 
-**ChangeLog** (append-only): `at`, `user`, `action`, `target`, `detail`. Written by every change made in the web app: counts and requested quantities (old → new per line), approvals, deliveries and expiry dates, OPD requests, medicine edits, imports, logins, user changes. Read by the admin in the app.
+**ChangeLog** (append-only): `at`, `user`, `action`, `target`, `detail`. Written when a change is submitted, not on every autosave: counts and requested quantities are logged once per line when the round is approved (count, suggested, เบิกจริง, boxes, reason, under the approver's name; `Rounds.counted_by` keeps who counted), plus approvals, deliveries and expiry dates, OPD requests, medicine edits, imports, logins, user changes. Read by the admin in the app.
 
 **Import**: scratch tab. The HOSxP export is pasted here, then cleared after a successful import.
 

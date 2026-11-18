@@ -279,19 +279,23 @@ test('counting a drug fetched from OPD: count only, nothing requested; latest co
   assert.deepEqual(d.last_count, { qty: 4, date: r.count_date });
 });
 
-test('change log: who did what, written by each change', () => {
+test('change log: counts are logged once at approval, not on every autosave', () => {
   const ss = setup();
   Api.setActor('Nurse A');
   const r = Api.startRound(ss);
   const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
-  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: '' }], ss);
-  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: '' }], ss); // no change: no row
+  const slow = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Slow tab');
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 1, final_qty: '' }], ss);
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: '' }, { drug_id: slow.drug_id, on_hand: 4 }], ss);
   Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: 200 }], ss);
-  const log = Api.changeLog(3, ss); // newest first; the import before it is logged too
-  assert.deepEqual(log.map(x => [x.user, x.action]), [['Nurse A', 'นับ/เบิก'], ['Nurse A', 'นับ/เบิก'], ['Nurse A', 'เริ่มรอบนับ']]);
-  assert.match(log[0].detail, /เบิกจริง – → 200/);
-  assert.match(log[1].detail, /คงเหลือ – → 12/);
-  assert.equal(log[0].target, 'Busy tab 10 mg.');
+  assert.equal(Api.changeLog(1, ss)[0].action, 'เริ่มรอบนับ'); // autosaves write nothing to the log
+  Api.setActor('Pharmacist B');
+  Api.approveRound(r.round_id, ss);
+  const log = Api.changeLog(3, ss); // newest first
+  assert.deepEqual(log.map(x => [x.user, x.action]), [['Pharmacist B', 'อนุมัติรอบ'], ['Pharmacist B', 'นับ/เบิก'], ['Pharmacist B', 'นับ/เบิก']]);
+  assert.equal(log[0].detail, 'นับ 2 รายการ, เบิก 1 รายการ');
+  const busyRow = log.find(x => x.target === 'Busy tab 10 mg.');
+  assert.match(busyRow.detail, /คงเหลือ 12; ควรเบิก \d+; เบิกจริง 200/);
   assert.equal(Db.readTable('Rounds', ss)[0].counted_by, 'Nurse A');
   Api.setActor('');
 });
