@@ -185,6 +185,90 @@ test('saveLines: blank count is "not counted", unknown drug fails', () => {
   assert.throws(() => Api.saveLines('nope', [], ss), /ไม่พบรอบ/);
 });
 
+test('saveReceived: delivery from main storage, line by line; round marked received when complete', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  const st = Api.state(null, ss);
+  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
+  const kcl = st.drugs.find(x => x.critical);
+  Api.saveLines(r.round_id, [
+    { drug_id: busy.drug_id, on_hand: 0, final_qty: '' },      // suggestion > 0
+    { drug_id: kcl.drug_id, on_hand: 0, final_qty: 3 },
+  ], ss);
+  Api.approveRound(r.round_id, ss); // receiving happens after approval
+
+  let res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: '2' }], ss);
+  assert.equal(res.lines[kcl.drug_id], 2);
+  assert.equal(res.round.received_at, ''); // Busy tab not checked yet
+
+  res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: busy.par }], ss);
+  assert.notEqual(res.round.received_at, '');
+  const st2 = Api.state(r.round_id, ss);
+  assert.equal(st2.lines[kcl.drug_id].received_qty, 2);
+  assert.notEqual(st2.round.received_at, '');
+
+  // clearing a line reopens the check
+  res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: '' }], ss);
+  assert.equal(res.round.received_at, '');
+
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: -1 }], ss), /ไม่ถูกต้อง/);
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: 'D999', received_qty: 1 }], ss), /ไม่ได้เบิก/);
+});
+
+test('saveReceived: a line with nothing to request is not part of the check', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  const st = Api.state(null, ss);
+  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
+  const kcl = st.drugs.find(x => x.critical);
+  Api.saveLines(r.round_id, [
+    { drug_id: busy.drug_id, on_hand: 9999, final_qty: '' }, // full: suggestion 0
+    { drug_id: kcl.drug_id, on_hand: 0, final_qty: 3 },
+  ], ss);
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่ได้เบิก/);
+  const res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss);
+  assert.notEqual(res.round.received_at, '');
+});
+
+test('OPD requests: save, receive line by line, cancel; tabs created in an older Sheet', () => {
+  const ss = setup();
+  // Sheet from before 18 Nov: no OPD tabs
+  ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdRequests' && sh.name !== 'OpdLines');
+  let st = Api.state(null, ss);
+  assert.deepEqual(st.opd_requests, []);
+  const slow = st.drugs.find(x => x.hosxp_name === 'Slow tab');
+  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
+
+  const req = Api.createOpdRequest('MONTHLY', [
+    { drug_id: slow.drug_id, qty: 15 },
+    { drug_id: busy.drug_id, qty: 0 }, // dropped
+  ], '', ss);
+  assert.match(req.request_id, /^OPD-\d{4}-\d{2}-\d{2}$/);
+  assert.equal(req.status, 'REQUESTED');
+  assert.deepEqual(req.lines, [{ drug_id: slow.drug_id, qty: 15, received_qty: '' }]);
+
+  // an urgent fetch the same day for a main-storage drug that ran low
+  const urgent = Api.createOpdRequest('URGENT', [{ drug_id: busy.drug_id, qty: 20 }], '', ss);
+  assert.equal(urgent.request_id, req.request_id + '-2');
+
+  let got = Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, received_qty: 10 }], ss);
+  assert.equal(got.status, 'RECEIVED');
+  assert.notEqual(got.received_at, '');
+  assert.equal(got.lines[0].received_qty, 10);
+
+  st = Api.state(null, ss);
+  assert.deepEqual(st.opd_requests.map(r => [r.request_id, r.status]),
+    [[urgent.request_id, 'REQUESTED'], [req.request_id, 'RECEIVED']]); // open first
+  assert.deepEqual(JSON.parse(JSON.stringify(st)), st);
+
+  assert.equal(Api.cancelOpdRequest(urgent.request_id, ss).status, 'CANCELLED');
+  assert.throws(() => Api.saveOpdReceived(urgent.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ยกเลิกแล้ว/);
+  assert.throws(() => Api.cancelOpdRequest(req.request_id, ss), /รับยาแล้ว/);
+  assert.throws(() => Api.createOpdRequest('WEEKLY', [{ drug_id: slow.drug_id, qty: 1 }], '', ss), /ประเภท/);
+  assert.throws(() => Api.createOpdRequest('URGENT', [{ drug_id: slow.drug_id, qty: 0 }], '', ss), /ยังไม่มีรายการ/);
+  assert.throws(() => Api.saveOpdReceived(req.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่อยู่ในรายการ/);
+});
+
 test('ui/Client.html: script parses', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/ui/Client.html'), 'utf8');
   const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');

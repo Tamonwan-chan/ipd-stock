@@ -112,13 +112,17 @@ var Db = (function () {
   }
 
   /**
-   * Add one existing tab's missing schema columns (formatted by type), so a Sheet set up
-   * before a column existed keeps working without rerunning setup. Cheap when nothing is missing.
+   * Create one tab if it is missing and add its missing schema columns (formatted by type),
+   * so a Sheet set up before a tab or column existed keeps working without rerunning setup.
+   * Cheap when nothing is missing.
    * @return {string[]} columns added
    */
   function ensureColumns(name, ss) {
     var S = schema_();
-    var sh = sheet_(name, ss);
+    S.table(name); // unknown names throw before anything is created
+    var book = spreadsheet_(ss);
+    var sh = book.getSheetByName(name);
+    if (!sh) { sh = book.insertSheet(name); sh.setFrozenRows(1); }
     var header = header_(sh);
     var missing = addMissingColumns_(sh, name, header);
     var rows = Math.max(sh.getMaxRows() - 1, 1);

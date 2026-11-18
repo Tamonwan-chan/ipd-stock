@@ -72,6 +72,10 @@ test('ensureColumns: adds the missing columns of one tab, formatted; no-op when 
   assert.deepEqual(sh.dump()[0], ['email', 'name', 'role']);
   assert.equal(sh.formats[3], '@');
   assert.throws(() => Db.ensureColumns('Nope', ss), /Unknown table|not found/);
+  // a tab that doesn't exist yet is created with its header
+  ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdLines');
+  assert.deepEqual(Db.ensureColumns('OpdLines', ss), Schema.columnNames('OpdLines'));
+  assert.equal(ss.getSheetByName('OpdLines').frozenRows, 1);
 });
 
 test('appendRows / readTable: round trip by type, blanks, _row', () => {
