@@ -474,6 +474,19 @@ var Api = (function () {
   }
 
   function objValues_(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+
+  /** Before a ใบรับ is confirmed: every line that received something needs an expiry date. */
+  function checkExpiry_(ref, lines, ss) {
+    var C = calc_(), D = db_();
+    var has = {};
+    readOptional_('Expiry', ss).forEach(function (x) { if (x.ref === ref && x.exp_date && !x.removed_at) has[x.drug_id] = true; });
+    var missing = lines.filter(function (l) { return C.toNumber(l.received_qty) > 0 && !has[l.drug_id]; });
+    if (!missing.length) return;
+    var drugs = {};
+    D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
+    var names = missing.slice(0, 3).map(function (l) { return drugLabel_(drugs[l.drug_id]) || l.drug_id; });
+    throw new Error('ยังไม่ได้ใส่วันหมดอายุ ' + missing.length + ' รายการ: ' + names.join(', ') + (missing.length > 3 ? ' …' : ''));
+  }
   function docName_(r, ref) { return r.req_no ? 'ใบเบิก ' + r.req_no : ref; }
 
   /**
@@ -490,6 +503,7 @@ var Api = (function () {
     var lines = D.readTable('RoundLines', ss).filter(function (l) { return l.round_id === roundId && requested_(l) > 0; });
     var todo = lines.filter(function (l) { return l.received_qty === '' || l.received_qty === undefined || l.received_qty === null; });
     if (todo.length) throw new Error('ยังไม่ได้ใส่จำนวนที่ได้รับ ' + todo.length + ' รายการ (ไม่ได้รับเลยให้ใส่ 0)');
+    checkExpiry_(roundId, lines, ss);
     round.receipt_no = nextNo_('ร', 'receipt_no', ss);
     round.received_at = now_();
     round.received_by = actor_();
@@ -598,6 +612,7 @@ var Api = (function () {
     D.readTable('OpdLines', ss).forEach(function (l) { if (l.request_id === requestId) lines[l.drug_id] = l; });
     var todo = objValues_(lines).filter(function (l) { return l.received_qty === '' || l.received_qty === undefined || l.received_qty === null; });
     if (todo.length) throw new Error('ยังไม่ได้ใส่จำนวนที่ได้รับ ' + todo.length + ' รายการ (ไม่ได้รับเลยให้ใส่ 0)');
+    checkExpiry_(requestId, objValues_(lines), ss);
     r.status = 'RECEIVED';
     r.receipt_no = nextNo_('ร', 'receipt_no', ss);
     r.received_at = now_();

@@ -225,6 +225,9 @@ test('main-storage ใบเบิก: number at approval, draft check, ใบ�
   assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยังไม่ได้ใส่จำนวนที่ได้รับ 1 รายการ/);
   Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 0 }], ss); // nothing came: 0
   assert.equal(Api.state(r.round_id, ss).round.received_at, '');
+  // what came needs its expiry date (a line with 0 doesn't)
+  assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยังไม่ได้ใส่วันหมดอายุ 1 รายการ: KCl/);
+  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, exp: ['2027-05-31'] }], ss);
 
   const doc = Api.confirmReceipt(r.round_id, ss);
   assert.equal(doc.receipt_no, 'ร.' + YY + '/0001');
@@ -233,7 +236,7 @@ test('main-storage ใบเบิก: number at approval, draft check, ใบ�
   assert.match(Api.changeLog(1, ss)[0].detail, /ใบเบิก บ\.\d\d\/0001: ครบ 0, ขาด 2/);
   // locked: quantities can't change, expiry dates can still be fixed
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss), /แก้จำนวนที่ได้รับไม่ได้/);
-  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 2, exp: ['2027-05-31'] }], ss);
+  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 2, exp: ['2027-06-30'] }], ss);
   assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยืนยันรับเข้าคลังแล้ว/);
 
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: -1 }], ss), /ไม่ถูกต้อง/);
@@ -259,7 +262,7 @@ test('saveReceived: a line with nothing to request is not part of the check; not
   ], ss);
   Api.approveRound(r.round_id, ss);
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่ได้เบิก/);
-  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss);
+  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3, exp: ['2027-01-31'] }], ss);
   assert.match(Api.confirmReceipt(r.round_id, ss).receipt_no, /^ร\./);
 
   const r2 = Api.startRound(ss);
@@ -294,6 +297,8 @@ test('OPD requests: ใบเบิก number when saved, draft receive, confirm
   let got = Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, received_qty: 10 }], ss);
   assert.equal(got.status, 'REQUESTED'); // a draft until confirmed
   assert.equal(got.lines[0].received_qty, 10);
+  assert.throws(() => Api.confirmOpdReceipt(req.request_id, ss), /ยังไม่ได้ใส่วันหมดอายุ/);
+  Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, exp: ['2027-02-28', '2027-04-30'] }], ss);
   got = Api.confirmOpdReceipt(req.request_id, ss);
   assert.deepEqual([got.status, got.receipt_no], ['RECEIVED', 'ร.' + YY + '/0001']);
   assert.notEqual(got.received_at, '');

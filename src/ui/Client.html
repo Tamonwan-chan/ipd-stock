@@ -1044,6 +1044,7 @@
   }
   function expCellHtml(prefix, ref, key) {
     var dates = expOf(prefix, ref, key);
+    if (!dates.length) dates = ['']; // one empty date box by default: what came needs its expiry date
     return dates.map(function (dt, i) {
       return '<span class="exp-in"><input type="date" value="' + esc(dt) + '" data-ek="' + esc(key) + '" data-ei="' + i + '" aria-label="วันหมดอายุ">' +
         '<button type="button" class="x" data-erm="' + esc(key) + '" data-ei="' + i + '" aria-label="ลบวันหมดอายุนี้">×</button></span>';
@@ -1234,7 +1235,7 @@
     }
     box.innerHTML = '<div class="card">' + head +
       '<p class="muted small">เทียบใบเบิกกับใบจ่ายที่มากับยา ใส่จำนวนที่ได้รับจริงทุกรายการ (หน่วยเดียวกับใบเบิก) ' +
-      'ได้ครบกด ครบ ไม่ได้รับเลยใส่ 0 และใส่วันหมดอายุของยาที่ได้รับ (หลายวันกด + วันหมดอายุ) ' +
+      'ได้ครบกด ครบ ไม่ได้รับเลยใส่ 0 ยาที่ได้รับต้องใส่วันหมดอายุทุกรายการ (หลายวันกด + วันหมดอายุ) ' +
       'กด บันทึกร่าง ได้ทุกเมื่อ ตรวจครบแล้วกด ยืนยันรับเข้าคลัง เพื่อออกเลขใบรับ ' +
       'ยาที่คลังไม่ได้ให้จะไม่ค้างไว้ ถ้ายังต้องการให้เบิกในใบเบิกถัดไป</p>' +
       '<div class="row"><button class="btn" type="button" id="recv-fill">รับครบทุกรายการที่ยังว่าง</button>' +
@@ -1246,8 +1247,16 @@
         '<button class="btn danger" type="button" id="recv-ocancel">ยกเลิกใบเบิกนี้</button></div>' : '') +
       '</div>';
     function sum() {
-      var n = unsaved(S.recvQty[doc.key], doc.key).length;
-      $('recv-sum').textContent = recvSummaryText(recvCounts(rows)) + (n ? ' · ยังไม่บันทึก ' + n + ' รายการ' : '');
+      var n = unsaved(S.recvQty[doc.key], doc.key).length, noExp = 0;
+      rows.forEach(function (r) { // received something but no expiry date yet: mark the cell
+        var need = num(r.val()) > 0 && !expOf(doc.key, doc.ref, r.key).filter(function (d) { return d; }).length;
+        if (need) noExp++;
+        var cell = $('recv-table').querySelector('[data-ecell="' + r.key + '"]');
+        if (cell) cell.classList.toggle('need', need);
+      });
+      $('recv-sum').innerHTML = esc(recvSummaryText(recvCounts(rows))) +
+        (noExp ? ' · <span class="danger-text">ยังไม่ใส่วันหมดอายุ ' + noExp + '</span>' : '') +
+        (n ? ' · ยังไม่บันทึก ' + n + ' รายการ' : '');
     }
     var fill = wireRecv($('recv-table'), doc.key, doc.ref, rows, function (k, v) { (S.recvQty[doc.key] = S.recvQty[doc.key] || {})[k] = v; }, sum);
     $('recv-fill').onclick = fill;
