@@ -1564,15 +1564,16 @@
     var html = '<div class="mm-page"><h1>ยอดสูงสุด / ต่ำสุด ห้องยาผู้ป่วยใน (IPD)</h1>' +
       '<p class="small" style="text-align:center">คำนวณจากการใช้ยา ' + thDate(S.state.usage.from) + ' – ' + thDate(S.state.usage.to) +
       ' · พิมพ์ ' + thDate(S.state.today) + ' · ต่ำกว่ายอดต่ำสุด → ขอจาก OPD วันนี้</p>';
-    var last = null;
+    var last = null, n = 0;
     lines.forEach(function (x) {
       if (x.loc !== last) {
         if (last !== null) html += '</tbody></table>';
+        n = 0; // each place's table starts on a white row
         html += (x.loc ? '<h2>' + esc(x.loc) + '</h2>' : '') + '<table><thead><tr><th>ยา</th><th style="width:14%">หน่วย</th>' +
           '<th style="width:16%">สูงสุด</th><th style="width:16%">ต่ำสุด</th></tr></thead><tbody>';
         last = x.loc;
       }
-      html += '<tr><td>' + esc(x.d.name) + ' <span class="small">' + esc(x.d.strength) + '</span>' +
+      html += '<tr' + (++n % 2 ? '' : ' class="alt"') + '><td>' + esc(x.d.name) + ' <span class="small">' + esc(x.d.strength) + '</span>' +
         (x.d.critical ? ' <b>(ห้ามขาด)</b>' : '') + '</td><td>' + esc(x.d.unit) + '</td>' +
         '<td class="n">' + fmt(x.max, 0) + '</td><td class="n">' + fmt(x.min, 0) + '</td></tr>';
     });
