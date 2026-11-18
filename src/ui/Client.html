@@ -647,7 +647,7 @@
       main.forEach(function (d) {
         var loc = placeOf(d);
         if (loc && loc !== last) { html += '<tr><td colspan="6"><b>' + esc(loc) + '</b></td></tr>'; last = loc; }
-        html += '<tr><td class="c">' + (++n) + '</td><td>' + esc(drugLabel(d)) + (d.critical ? ' <b>(ห้ามขาด)</b>' : '') + '</td><td>' + esc(d.unit) +
+        html += '<tr' + (++n % 2 ? '' : ' class="alt"') + '><td class="c">' + n + '</td><td>' + esc(drugLabel(d)) + (d.critical ? ' <b>(ห้ามขาด)</b>' : '') + '</td><td>' + esc(d.unit) +
           '</td><td class="n">' + fmt(reqUnits(d.par, d.factor), 0) + '</td><td class="n">' + fmt(reqUnits(d.min, d.factor), 0) + '</td><td></td></tr>';
       });
       html += '</tbody></table>';
@@ -656,7 +656,7 @@
       html += '<h2>ขอจาก OPD (' + opd.length + ' รายการ)</h2><table><thead><tr><th style="width:7%">ลำดับ</th><th>ยา</th>' +
         '<th style="width:12%">หน่วย</th><th style="width:20%">ใช้เฉลี่ย/' + st.settings.opd_cycle_days + ' วัน</th><th style="width:16%">นับได้</th></tr></thead><tbody>';
       opd.forEach(function (d) {
-        html += '<tr><td class="c">' + (++n) + '</td><td>' + esc(drugLabel(d)) + '</td><td>' + esc(d.unit) + '</td><td class="n">' +
+        html += '<tr' + (++n % 2 ? '' : ' class="alt"') + '><td class="c">' + n + '</td><td>' + esc(drugLabel(d)) + '</td><td>' + esc(d.unit) + '</td><td class="n">' +
           fmt(d.opd_suggestion, 0) + '</td><td></td></tr>';
       });
       html += '</tbody></table>';
