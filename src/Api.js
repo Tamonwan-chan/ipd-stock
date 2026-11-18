@@ -72,7 +72,49 @@ var Api = (function () {
   function roundInfo_(r) {
     return { round_id: r.round_id, count_date: r.count_date, status: r.status, counted_by: r.counted_by || '',
       approved_at: r.approved_at || '', reviewed_by: r.reviewed_by || '',
-      received_at: r.received_at || '', received_by: r.received_by || '' };
+      received_at: r.received_at || '', received_by: r.received_by || '',
+      req_no: r.req_no || '', receipt_no: r.receipt_no || '' };
+  }
+
+  /**
+   * Next document number: ใบเบิก 'บ' (req_no) or ใบรับ 'ร' (receipt_no), e.g. บ.69/0001.
+   * One series for main storage and OPD together, starting at 0001 each Thai (B.E.) year.
+   */
+  function nextNo_(prefix, field, ss) {
+    var head = prefix + '.' + String(Number(today_().slice(0, 4)) + 543).slice(2) + '/';
+    var max = 0;
+    ['Rounds', 'OpdRequests'].forEach(function (t) {
+      readOptional_(t, ss).forEach(function (r) {
+        var v = String(r[field] || '');
+        if (v.indexOf(head) !== 0) return;
+        var n = parseInt(v.slice(head.length), 10);
+        if (n > max) max = n;
+      });
+    });
+    var s = String(max + 1);
+    while (s.length < 4) s = '0' + s;
+    return head + s;
+  }
+
+  /** Main-storage ใบเบิก (an approved round) with its requested lines, for the delivery check. */
+  function mainDoc_(r, lines) {
+    var info = roundInfo_(r);
+    info.lines = (lines || []).filter(function (l) { return requested_(l) > 0; }).map(function (l) {
+      return { drug_id: l.drug_id, qty: requested_(l), boxes: l.boxes === undefined ? '' : l.boxes,
+        pack_size: l.pack_size === undefined ? '' : l.pack_size,
+        received_qty: l.received_qty === undefined ? '' : l.received_qty };
+    });
+    return info;
+  }
+
+  /** Short result of a check: "ครบ 10, ขาด 2" (lines are {qty, received_qty}). */
+  function recvSummary_(lines) {
+    var C = calc_(), ok = 0, short = 0, over = 0;
+    lines.forEach(function (l) {
+      var q = C.toNumber(l.qty), v = C.toNumber(l.received_qty);
+      if (v === q) ok++; else if (v < q) short++; else over++;
+    });
+    return 'ครบ ' + ok + (short ? ', ขาด ' + short : '') + (over ? ', เกิน ' + over : '');
   }
 
   /** Rows of a tab that may not exist yet in an older Sheet (created on first write). */
@@ -115,7 +157,7 @@ var Api = (function () {
   function opdInfo_(r, lines) {
     return { request_id: r.request_id, request_date: r.request_date, kind: r.kind, status: r.status,
       requested_by: r.requested_by || '', received_at: r.received_at || '', received_by: r.received_by || '',
-      note: r.note || '', lines: lines };
+      note: r.note || '', req_no: r.req_no || '', receipt_no: r.receipt_no || '', lines: lines };
   }
 
   /**
@@ -133,11 +175,12 @@ var Api = (function () {
     if (roundId) round = rounds.filter(function (r) { return r.round_id === roundId; })[0] || null;
     if (!round) round = rounds.filter(function (r) { return r.status !== 'APPROVED'; })[0] || rounds[0] || null;
 
-    var lines = {}, lastCount = {};
+    var lines = {}, lastCount = {}, byRound = {};
     var roundDate = {};
     rounds.forEach(function (r) { roundDate[r.round_id] = r.count_date; });
     D.readTable('RoundLines', ss).forEach(function (l) {
       if (round && l.round_id === round.round_id) lines[l.drug_id] = lineFromRow_(l);
+      (byRound[l.round_id] = byRound[l.round_id] || []).push(l);
       var q = C.toNumber(l.on_hand), dt = roundDate[l.round_id];
       if (q === null || !dt) return;
       var prev = lastCount[l.drug_id];
@@ -191,9 +234,23 @@ var Api = (function () {
       round: round ? roundInfo_(round) : null,
       lines: lines,
       rounds: rounds.slice(0, 20).map(roundInfo_),
+      main_docs: mainDocs_(rounds, byRound),
       opd_requests: opdRequests_(ss),
       expiry: expiryOnHand_(readOptional_('Expiry', ss))
     };
+  }
+
+  /**
+   * Main-storage ใบเบิก for ตรวจรับยา, newest first: every approved one still waiting for its
+   * delivery check, then the last 10 received. Rounds not approved yet are never listed.
+   */
+  function mainDocs_(rounds, byRound) {
+    var docs = rounds.filter(function (r) { return r.status === 'APPROVED'; }).map(function (r) {
+      return mainDoc_(r, byRound[r.round_id]);
+    }).filter(function (d) { return d.lines.length; });
+    var open = docs.filter(function (d) { return !d.received_at; });
+    var done = docs.filter(function (d) { return d.received_at; }).slice(0, 10);
+    return open.concat(done);
   }
 
   // ------------------------------------------------------------------ expiry
@@ -372,10 +429,10 @@ var Api = (function () {
   }
 
   /**
-   * Record what main storage delivered for a round (ตรวจรับ). Allowed after approval.
-   * The round is marked received once every requested line has a received quantity.
-   * @param {{drug_id:string, received_qty:*}[]} edits  blank = not checked yet
-   * @return {{lines:Object<string,*>, round:Object}} received_qty by drug_id, and the round
+   * Save the delivery check of an approved ใบเบิก from main storage (a draft until
+   * confirmReceipt). After confirmation the quantities are locked; expiry dates can still be fixed.
+   * @param {{drug_id:string, received_qty:*, exp:string[]}[]} edits  blank qty = not checked yet
+   * @return {{doc:Object, expiry:Object[]}} the ใบเบิก with its lines, and expiry dates on the shelf
    */
   function saveReceived(roundId, edits, ss) {
     var D = db_();
@@ -383,6 +440,7 @@ var Api = (function () {
     D.ensureColumns('RoundLines', ss);
     D.ensureColumns('Expiry', ss);
     var round = roundById_(roundId, ss);
+    if (round.status !== 'APPROVED') throw new Error('ใบเบิกนี้ยังไม่อนุมัติ ยังตรวจรับไม่ได้');
     var lines = {};
     D.readTable('RoundLines', ss).forEach(function (l) { if (l.round_id === roundId) lines[l.drug_id] = l; });
     var drugs = {};
@@ -395,7 +453,9 @@ var Api = (function () {
       var was = l.received_qty;
       var diff = [];
       if (e.received_qty !== undefined) {
-        l.received_qty = receivedValue_(e.received_qty);
+        var v = receivedValue_(e.received_qty);
+        if (round.received_at && show_(v) !== show_(was)) throw new Error('ยืนยันรับเข้าคลังแล้ว แก้จำนวนที่ได้รับไม่ได้');
+        l.received_qty = v;
         rows.push({ round_id: roundId, drug_id: e.drug_id, received_qty: l.received_qty });
         if (show_(was) !== show_(l.received_qty)) diff.push('ได้รับ ' + show_(was) + ' → ' + show_(l.received_qty));
       }
@@ -405,24 +465,38 @@ var Api = (function () {
         var t = expiryText_(setExpiry_('MAIN', roundId, e.drug_id, dates, lots, lotRows));
         if (t) diff.push(t);
       }
-      if (diff.length) logs.push(['ตรวจรับจากคลัง', drugLabel_(drugs[e.drug_id]) || e.drug_id, 'รอบ ' + roundId + ': ' + diff.join('; ')]);
+      if (diff.length) logs.push(['ตรวจรับจากคลัง', drugLabel_(drugs[e.drug_id]) || e.drug_id, docName_(round, roundId) + ': ' + diff.join('; ')]);
     });
     if (rows.length) D.upsert('RoundLines', rows, ss);
     if (lotRows.length) D.upsert('Expiry', lotRows, ss);
     log_(logs, ss);
-    var done = Object.keys(lines).every(function (id) {
-      var l = lines[id];
-      return !(requested_(l) > 0) || l.received_qty !== '';
-    });
-    if (done && !round.received_at) {
-      round.received_at = now_();
-      round.received_by = actor_();
-    } else if (!done) {
-      round.received_at = '';
-      round.received_by = '';
-    }
-    D.updateFields('Rounds', [round], ['received_at', 'received_by'], ss);
-    return { lines: out, round: roundInfo_(round), expiry: expiryOnHand_(D.readTable('Expiry', ss)) };
+    return { doc: mainDoc_(round, objValues_(lines)), expiry: expiryOnHand_(D.readTable('Expiry', ss)) };
+  }
+
+  function objValues_(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function docName_(r, ref) { return r.req_no ? 'ใบเบิก ' + r.req_no : ref; }
+
+  /**
+   * Finish the delivery check of a main-storage ใบเบิก: every requested line must have a received
+   * quantity (0 when nothing came). Gives the ใบรับ number (ร.69/0001) and locks the quantities.
+   * What main storage didn't give is not carried over: it goes on the next ใบเบิก if still needed.
+   */
+  function confirmReceipt(roundId, ss) {
+    var D = db_();
+    D.ensureColumns('Rounds', ss);
+    var round = roundById_(roundId, ss);
+    if (round.status !== 'APPROVED') throw new Error('ใบเบิกนี้ยังไม่อนุมัติ ยังตรวจรับไม่ได้');
+    if (round.received_at) throw new Error('ใบเบิกนี้ยืนยันรับเข้าคลังแล้ว');
+    var lines = D.readTable('RoundLines', ss).filter(function (l) { return l.round_id === roundId && requested_(l) > 0; });
+    var todo = lines.filter(function (l) { return l.received_qty === '' || l.received_qty === undefined || l.received_qty === null; });
+    if (todo.length) throw new Error('ยังไม่ได้ใส่จำนวนที่ได้รับ ' + todo.length + ' รายการ (ไม่ได้รับเลยให้ใส่ 0)');
+    round.receipt_no = nextNo_('ร', 'receipt_no', ss);
+    round.received_at = now_();
+    round.received_by = actor_();
+    D.updateFields('Rounds', [round], ['receipt_no', 'received_at', 'received_by'], ss);
+    var doc = mainDoc_(round, lines);
+    log_([['ยืนยันรับเข้าคลัง', round.receipt_no, 'จากคลัง ' + docName_(round, roundId) + ': ' + recvSummary_(doc.lines)]], ss);
+    return doc;
   }
 
   /**
@@ -450,11 +524,13 @@ var Api = (function () {
     var ids = D.readTable('OpdRequests', ss).map(function (r) { return r.request_id; });
     var id = 'OPD-' + today, n = 2;
     while (ids.indexOf(id) >= 0) id = 'OPD-' + today + '-' + n++;
-    var r = { request_id: id, request_date: today, kind: kind, status: 'REQUESTED', requested_by: actor_(), note: note || '' };
+    // An OPD request needs no approval: its ใบเบิก number is given when it is saved.
+    var r = { request_id: id, request_date: today, kind: kind, status: 'REQUESTED', requested_by: actor_(), note: note || '',
+      req_no: nextNo_('บ', 'req_no', ss), receipt_no: '' };
     D.appendRows('OpdRequests', [r], ss);
     var out = rows.map(function (l) { return { request_id: id, drug_id: l.drug_id, qty: l.qty, received_qty: '' }; });
     D.appendRows('OpdLines', out, ss);
-    log_([['ขอยาจาก OPD', id, (kind === 'URGENT' ? 'ด่วน' : 'ประจำเดือน') + ': ' + rows.map(function (l) {
+    log_([['ขอยาจาก OPD', r.req_no, (kind === 'URGENT' ? 'ด่วน' : 'ประจำเดือน') + ': ' + rows.map(function (l) {
       return drugLabel_(drugs[l.drug_id]) + ' ' + l.qty;
     }).join(', ')]], ss);
     return opdInfo_(r, out.map(function (l) { return { drug_id: l.drug_id, qty: l.qty, received_qty: '' }; }));
@@ -467,14 +543,15 @@ var Api = (function () {
   }
 
   /**
-   * Record what OPD handed over. The request is RECEIVED once every line has a quantity.
-   * @param {{drug_id:string, received_qty:*}[]} edits
+   * Save what OPD handed over (a draft until confirmOpdReceipt; then quantities are locked).
+   * @param {{drug_id:string, received_qty:*, exp:string[]}[]} edits
    */
   function saveOpdReceived(requestId, edits, ss) {
     var D = db_();
     D.ensureColumns('Expiry', ss);
     var r = opdById_(requestId, ss);
     if (r.status === 'CANCELLED') throw new Error('รายการขอนี้ยกเลิกแล้ว');
+    var locked = r.status === 'RECEIVED';
     var lines = {};
     D.readTable('OpdLines', ss).forEach(function (l) { if (l.request_id === requestId) lines[l.drug_id] = l; });
     var drugs = {};
@@ -485,7 +562,9 @@ var Api = (function () {
       if (!l) throw new Error('ยานี้ไม่อยู่ในรายการขอ: ' + e.drug_id);
       var was = l.received_qty, diff = [];
       if (e.received_qty !== undefined) {
-        l.received_qty = receivedValue_(e.received_qty);
+        var v = receivedValue_(e.received_qty);
+        if (locked && show_(v) !== show_(was)) throw new Error('ยืนยันรับเข้าคลังแล้ว แก้จำนวนที่ได้รับไม่ได้');
+        l.received_qty = v;
         rows.push({ request_id: requestId, drug_id: e.drug_id, received_qty: l.received_qty });
         if (show_(was) !== show_(l.received_qty)) diff.push('ได้รับ ' + show_(was) + ' → ' + show_(l.received_qty));
       }
@@ -494,23 +573,38 @@ var Api = (function () {
         var t = expiryText_(setExpiry_('OPD', requestId, e.drug_id, dates, lots, lotRows));
         if (t) diff.push(t);
       }
-      if (diff.length) logs.push(['รับยาจาก OPD', drugLabel_(drugs[e.drug_id]) || e.drug_id, requestId + ': ' + diff.join('; ')]);
+      if (diff.length) logs.push(['รับยาจาก OPD', drugLabel_(drugs[e.drug_id]) || e.drug_id, docName_(r, requestId) + ': ' + diff.join('; ')]);
     });
     if (rows.length) D.upsert('OpdLines', rows, ss);
     if (lotRows.length) D.upsert('Expiry', lotRows, ss);
     log_(logs, ss);
-    var done = Object.keys(lines).every(function (id) { return lines[id].received_qty !== ''; });
-    if (done && r.status !== 'RECEIVED') {
-      r.status = 'RECEIVED'; r.received_at = now_(); r.received_by = actor_();
-    } else if (!done) {
-      r.status = 'REQUESTED'; r.received_at = ''; r.received_by = '';
-    }
-    D.updateFields('OpdRequests', [r], ['status', 'received_at', 'received_by'], ss);
-    var info = opdInfo_(r, Object.keys(lines).map(function (id) {
-      var l = lines[id];
-      return { drug_id: l.drug_id, qty: l.qty, received_qty: l.received_qty };
-    }));
+    var info = opdInfo_(r, opdLineList_(lines));
     info.expiry = expiryOnHand_(D.readTable('Expiry', ss));
+    return info;
+  }
+
+  function opdLineList_(lines) {
+    return objValues_(lines).map(function (l) { return { drug_id: l.drug_id, qty: l.qty, received_qty: l.received_qty }; });
+  }
+
+  /** Finish the check of what OPD handed over: gives the ใบรับ number, like confirmReceipt. */
+  function confirmOpdReceipt(requestId, ss) {
+    var D = db_();
+    D.ensureColumns('OpdRequests', ss);
+    var r = opdById_(requestId, ss);
+    if (r.status === 'CANCELLED') throw new Error('รายการขอนี้ยกเลิกแล้ว');
+    if (r.status === 'RECEIVED') throw new Error('ใบเบิกนี้ยืนยันรับเข้าคลังแล้ว');
+    var lines = {};
+    D.readTable('OpdLines', ss).forEach(function (l) { if (l.request_id === requestId) lines[l.drug_id] = l; });
+    var todo = objValues_(lines).filter(function (l) { return l.received_qty === '' || l.received_qty === undefined || l.received_qty === null; });
+    if (todo.length) throw new Error('ยังไม่ได้ใส่จำนวนที่ได้รับ ' + todo.length + ' รายการ (ไม่ได้รับเลยให้ใส่ 0)');
+    r.status = 'RECEIVED';
+    r.receipt_no = nextNo_('ร', 'receipt_no', ss);
+    r.received_at = now_();
+    r.received_by = actor_();
+    D.updateFields('OpdRequests', [r], ['status', 'receipt_no', 'received_at', 'received_by'], ss);
+    var info = opdInfo_(r, opdLineList_(lines));
+    log_([['ยืนยันรับเข้าคลัง', r.receipt_no, 'จาก OPD ' + docName_(r, requestId) + ': ' + recvSummary_(info.lines)]], ss);
     return info;
   }
 
@@ -524,33 +618,37 @@ var Api = (function () {
     return opdInfo_(r, []);
   }
 
-  /** Approve (freeze) a round. */
+  /** Approve (freeze) a round. Its ใบเบิก gets a number (บ.69/0001) if anything is requested. */
   function approveRound(roundId, ss) {
     var D = db_();
+    D.ensureColumns('Rounds', ss);
     var round = roundById_(roundId, ss);
+    if (round.status === 'APPROVED') throw new Error('รอบนี้อนุมัติแล้ว');
+    var mine = D.readTable('RoundLines', ss).filter(function (l) { return l.round_id === roundId; });
     round.status = 'APPROVED';
     round.approved_at = now_();
     round.reviewed_by = actor_();
-    D.updateFields('Rounds', [round], ['status', 'approved_at', 'reviewed_by'], ss);
+    if (mine.some(function (l) { return requested_(l) > 0; })) round.req_no = nextNo_('บ', 'req_no', ss);
+    D.updateFields('Rounds', [round], ['status', 'approved_at', 'reviewed_by', 'req_no'], ss);
     // The change log gets the final count and request of each line here, once,
     // not every autosave while staff type.
     var drugs = {};
     D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
     var counted = 0, requested = 0, logs = [];
-    D.readTable('RoundLines', ss).forEach(function (l) {
-      if (l.round_id !== roundId) return;
+    mine.forEach(function (l) {
       var parts = [];
       if (l.on_hand !== '' && l.on_hand !== null) { counted++; parts.push('คงเหลือ ' + l.on_hand); }
       if (l.suggested_qty !== '' && l.suggested_qty !== null) parts.push('ควรเบิก ' + l.suggested_qty);
+      if (requested_(l) > 0) requested++;
       if (l.final_qty !== '' && l.final_qty !== null) {
-        if (Number(l.final_qty) > 0) requested++;
         parts.push('เบิกจริง ' + l.final_qty + (l.boxes !== '' && l.boxes !== null ? ' (' + l.boxes + '×' + l.pack_size + ')' : ''));
       }
       if (l.change_reason) parts.push('เหตุผล: ' + l.change_reason);
       if (parts.length) logs.push(['นับ/เบิก', drugLabel_(drugs[l.drug_id]) || l.drug_id, 'รอบ ' + roundId + ': ' + parts.join('; ')]);
     });
     // Summary row last, so it heads the newest-first log view.
-    log_(logs.concat([['อนุมัติรอบ', roundId, 'นับ ' + counted + ' รายการ, เบิก ' + requested + ' รายการ']]), ss);
+    log_(logs.concat([['อนุมัติรอบ', roundId, (round.req_no ? 'ใบเบิก ' + round.req_no + ': ' : '') +
+      'นับ ' + counted + ' รายการ, เบิก ' + requested + ' รายการ']]), ss);
     return roundInfo_(round);
   }
 
@@ -693,7 +791,8 @@ var Api = (function () {
   }
 
   return { state: state, importFile: importFile, startRound: startRound, saveLines: saveLines, approveRound: approveRound,
-    saveReceived: saveReceived, createOpdRequest: createOpdRequest, saveOpdReceived: saveOpdReceived,
+    saveReceived: saveReceived, confirmReceipt: confirmReceipt, createOpdRequest: createOpdRequest,
+    saveOpdReceived: saveOpdReceived, confirmOpdReceipt: confirmOpdReceipt,
     cancelOpdRequest: cancelOpdRequest, removeExpiry: removeExpiry, drugCard: drugCard, saveDrug: saveDrug,
     changeLog: changeLog, setActor: setActor, log: log_ };
 })();
@@ -741,6 +840,8 @@ function apiImportFile(token, rows) { return locked_(token, null, function () { 
 function apiStartRound(token) { return locked_(token, null, function () { return Api.startRound(); }); }
 function apiSaveLines(token, roundId, edits) { return locked_(token, null, function () { return Api.saveLines(roundId, edits); }); }
 function apiSaveReceived(token, roundId, edits) { return locked_(token, null, function () { return Api.saveReceived(roundId, edits); }); }
+function apiConfirmReceipt(token, roundId) { return locked_(token, null, function () { return Api.confirmReceipt(roundId); }); }
+function apiConfirmOpdReceipt(token, requestId) { return locked_(token, null, function () { return Api.confirmOpdReceipt(requestId); }); }
 function apiCreateOpdRequest(token, kind, lines, note) { return locked_(token, null, function () { return Api.createOpdRequest(kind, lines, note); }); }
 function apiSaveOpdReceived(token, requestId, edits) { return locked_(token, null, function () { return Api.saveOpdReceived(requestId, edits); }); }
 function apiCancelOpdRequest(token, requestId) { return locked_(token, null, function () { return Api.cancelOpdRequest(requestId); }); }

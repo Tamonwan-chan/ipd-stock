@@ -31,8 +31,8 @@
     opdQty: {},           // drug_id -> qty typed
     opdFilter: '',
     opdAll: false,        // OPD list also shows main-storage drugs (urgent fetch)
-    recv: {},             // drug_id -> received qty typed, main-storage check not yet saved
-    recvOpd: {},          // request_id -> {drug_id -> received qty typed}
+    recvQty: {},          // doc key ('MAIN:'+round_id / 'OPD:'+request_id) -> {drug_id -> received qty typed, not saved}
+    recvSel: null,        // doc key of the ใบเบิก being checked
     recvExp: {},          // 'main' or request_id -> {drug_id -> [expiry dates]} not yet saved
     drugQ: '',
     drugF: 'all',
@@ -302,7 +302,7 @@
   function logout() {
     flushSave().then(function () {
       var t = S.token;
-      S.state = null; S.user = null; S.pending = {}; S.recv = {}; S.recvOpd = {}; S.recvExp = {}; S.card = null; S.drugSel = null;
+      S.state = null; S.user = null; S.pending = {}; S.recvQty = {}; S.recvSel = null; S.recvExp = {}; S.card = null; S.drugSel = null;
       S.editing = null; S.users = null; S.log = null;
       showLogin('ออกจากระบบแล้ว');
       run('apiLogout', t).catch(function () {});
@@ -351,7 +351,7 @@
 
   function waitingCounts() {
     var st = S.state;
-    var main = st.round && st.round.status === 'APPROVED' && !st.round.received_at && orderLines().length ? 1 : 0;
+    var main = (st.main_docs || []).filter(function (d) { return !d.received_at; }).length;
     var opd = st.opd_requests.filter(function (r) { return r.status === 'REQUESTED'; }).length;
     return { main: main, opd: opd };
   }
@@ -443,9 +443,9 @@
       ['พิมพ์ใบนับยา', '', '<button class="btn small" type="button" data-print-count>' + icon('printer') + 'พิมพ์</button>'],
       ['กรอกยอดนับ', r ? c.counted + '/' + drugs.length + (opdShelfDrugs().length ? ' · OPD ' + opdCounted + '/' + opdShelfDrugs().length : '') : '', r && c.counted === drugs.length && drugs.length ? 'done' : ''],
       ['เบิกจริง / กล่อง', r ? 'ต้องเบิก ' + c.ordering + ' รายการ' : '', ''],
-      ['อนุมัติ', approved ? thDateTime(r.approved_at) : '', approved ? 'done' : ''],
+      ['อนุมัติ', approved ? (r.req_no ? 'ใบเบิก ' + r.req_no + ' · ' : '') + thDateTime(r.approved_at) : '', approved ? 'done' : ''],
       ['พิมพ์ใบเบิก ส่งคลัง', '', ''],
-      ['ตรวจรับ + วันหมดอายุ', received ? thDateTime(r.received_at) : '', received ? 'done' : '']
+      ['ตรวจรับ + วันหมดอายุ', received ? (r.receipt_no ? 'ใบรับ ' + r.receipt_no + ' · ' : '') + thDateTime(r.received_at) : '', received ? 'done' : '']
     ];
     var title = r ? 'รอบเบิกจากคลัง ' + thDate(r.count_date) : 'ยังไม่มีรอบเบิกจากคลัง';
     return '<div class="card"><div class="row"><h2>' + esc(title) + '</h2>' +
@@ -943,12 +943,15 @@
     armed($('btn-approve'), 'กดอีกครั้งเพื่อยืนยันอนุมัติ (แก้ไขไม่ได้อีก)', function (btn) {
       btn.disabled = true;
       flushSave().then(function () { return api('apiApproveRound', S.state.round.round_id); })
-        .then(function () { toast('อนุมัติแล้ว พิมพ์ใบเบิกได้'); S.reqSub = 'form'; return reload(S.state.round.round_id); })
+        .then(function (r) { toast(r && r.req_no ? 'อนุมัติแล้ว ใบเบิกเลขที่ ' + r.req_no + ' พิมพ์ใบเบิกได้' : 'อนุมัติแล้ว'); S.reqSub = 'form'; return reload(S.state.round.round_id); })
         .catch(function (e) { toast('อนุมัติไม่สำเร็จ: ' + errMsg(e), true); btn.disabled = false; });
     });
   }
 
   // ------------------------------------------------------------------ form
+  // เลขที่ on the paper form: the ใบเบิก number given at approval, else what staff typed.
+  function formNo() { return (S.state.round && S.state.round.req_no) || S.head.no; }
+
   function formLines() {
     return orderLines().map(function (x, i) {
       var l = x.l, byBox = l.boxes !== null && boxQty(l.boxes, l.pack) === l.qty;
@@ -961,7 +964,10 @@
 
   function renderForm() {
     if (!S.state) return;
-    ['book', 'no', 'from', 'to', 'date'].forEach(function (k) { var el = $('fh-' + k); if (el && document.activeElement !== el) el.value = S.head[k]; });
+    ['book', 'no', 'from', 'to', 'date'].forEach(function (k) { var el = $('fh-' + k); if (el && document.activeElement !== el) el.value = k === 'no' ? formNo() : S.head[k]; });
+    var reqNo = S.state.round && S.state.round.req_no;
+    $('fh-no').readOnly = !!reqNo;
+    $('fh-no').title = reqNo ? 'เลขที่ใบเบิกจากระบบ (ออกเมื่ออนุมัติ)' : 'ออกเลขให้อัตโนมัติเมื่ออนุมัติรอบ';
     var lines = formLines();
     var box = $('form-pages');
     if (!S.state.round) { box.innerHTML = '<div class="card">ยังไม่มีรอบนับ เริ่มรอบที่ นับยาและยอดเบิก ก่อน</div>'; $('form-summary').textContent = ''; return; }
@@ -982,7 +988,7 @@
       }
       html += '<div class="form-page">' +
         '<div class="fp-title"><div>เล่มที่ <span class="fill">' + esc(S.head.book) + '</span></div><h1>ใบเบิกหรือใบส่งคืน</h1>' +
-        '<div class="r">เลขที่ <span class="fill">' + esc(S.head.no) + '</span></div></div>' +
+        '<div class="r">เลขที่ <span class="fill">' + esc(formNo()) + '</span></div></div>' +
         '<table class="fp-head"><tr><td style="width:55%">แผ่นที่ ' + (p + 1) + ' &nbsp; จำนวน ' + pages + ' แผ่น</td><td>' + esc(S.head.date) + '</td></tr>' +
         '<tr><td>จาก ' + esc(S.head.from) + '</td><td rowspan="3"></td></tr>' +
         '<tr><td>ถึง ' + esc(S.head.to) + '</td></tr>' +
@@ -1125,115 +1131,181 @@
     });
   }
 
-  // Main storage: what arrived for this round's requisition.
-  function mainRecvRows() {
-    return formLines().map(function (l) {
-      return {
-        key: l.id, name: l.name, unit: l.unit, req: l.qty,
-        reqText: l.boxes === null ? fmt(l.qty, 0) : fmt(l.boxes, 0) + 'x' + fmt(l.pack) + ' (' + fmt(l.qty, 0) + ')',
-        val: function () {
-          if (S.recv[this.key] !== undefined) return S.recv[this.key];
-          var saved = S.state.lines[this.key];
-          return saved && saved.received_qty !== undefined ? saved.received_qty : '';
-        }
-      };
+  // ตรวจรับยา: approved ใบเบิก (main storage and OPD) waiting for their delivery. Staff pick the
+  // one in front of them, type what came (a draft, saved any time), then ยืนยันรับเข้าคลัง gives
+  // the ใบรับ its number and locks the quantities. What wasn't given is closed, not carried over.
+  // doc: {key, source 'MAIN'|'OPD', ref, req_no, date, kind, open, receipt_no, received_at, received_by, by, lines}
+  function recvDocs() {
+    var st = S.state;
+    var main = (st.main_docs || []).map(function (d) {
+      return { key: 'MAIN:' + d.round_id, source: 'MAIN', ref: d.round_id, req_no: d.req_no, date: d.count_date, kind: '',
+        open: !d.received_at, receipt_no: d.receipt_no, received_at: d.received_at, received_by: d.received_by,
+        by: d.reviewed_by, lines: d.lines };
+    });
+    var opd = st.opd_requests.filter(function (r) { return r.status !== 'CANCELLED'; }).map(function (r) {
+      return { key: 'OPD:' + r.request_id, source: 'OPD', ref: r.request_id, req_no: r.req_no, date: r.request_date, kind: r.kind,
+        open: r.status === 'REQUESTED', receipt_no: r.receipt_no, received_at: r.received_at, received_by: r.received_by,
+        by: r.requested_by, lines: r.lines };
+    });
+    return main.concat(opd);
+  }
+  function docTitle(doc) { return doc.req_no ? 'ใบเบิก ' + doc.req_no : (doc.source === 'MAIN' ? 'ใบเบิกรอบ ' : 'ขอ OPD ') + thDate(doc.date); }
+  function docFrom(doc) { return doc.source === 'MAIN' ? 'คลังยา' : 'OPD' + (doc.kind === 'URGENT' ? ' (ด่วน)' : ''); }
+  function recvTyped(doc) { return S.recvQty[doc.key] || {}; }
+  function recvRows(doc) {
+    var dm = drugMap();
+    return doc.lines.map(function (l) {
+      var d = dm[l.drug_id], q = num(l.qty), b = num(l.boxes), p = num(l.pack_size);
+      var boxed = doc.source === 'MAIN' && b !== null && p !== null && boxQty(b, p) === q;
+      return { key: l.drug_id, name: drugLabel(d) || l.drug_id, unit: d ? d.unit : '', req: q,
+        reqText: boxed ? fmt(b, 0) + 'x' + fmt(p) + ' (' + fmt(q, 0) + ')' : fmt(q, 0),
+        val: function () { var t = recvTyped(doc); return t[this.key] !== undefined ? t[this.key] : l.received_qty; } };
     });
   }
 
   function renderReceive() {
     if (!S.state) return;
-    renderMainReceive();
-    renderOpdOpen();
+    var box = $('receive-body'), docs = recvDocs();
+    var open = docs.filter(function (d) { return d.open; }).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    var done = docs.filter(function (d) { return !d.open; })
+      .sort(function (a, b) { return a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0; }).slice(0, 15);
+    var keys = docs.map(function (d) { return d.key; });
+    if (S.recvSel && keys.indexOf(S.recvSel) < 0) S.recvSel = null;
+    if (!S.recvSel && open.length === 1) S.recvSel = open[0].key;
+    var sel = docs.filter(function (d) { return d.key === S.recvSel; })[0] || null;
+
+    var html = '<div class="card"><h2>ใบเบิกที่รอตรวจรับ</h2>' +
+      '<p class="muted small">เฉพาะใบเบิกที่อนุมัติแล้ว เมื่อยามาถึง กดเลือกใบเบิกที่ตรงกับยาที่ได้รับ</p>' +
+      (open.length ? docListHtml(open, false) : '<p class="muted small">ไม่มีใบเบิกที่รอยา</p>') + '</div>';
+    html += '<div id="recv-doc"></div>';
+    if (done.length) {
+      html += '<div class="card"><h2>ใบรับเข้าคลังที่ยืนยันแล้ว</h2>' +
+        '<p class="muted small">กดเพื่อดูรายการที่ได้รับ (ล่าสุด ' + done.length + ' ใบ)</p>' + docListHtml(done, true) + '</div>';
+    }
+    box.innerHTML = html;
+    box.onclick = function (e) {
+      var t = e.target.closest('tr[data-doc]');
+      if (!t) return;
+      S.recvSel = S.recvSel === t.getAttribute('data-doc') ? null : t.getAttribute('data-doc');
+      renderReceive();
+      if (S.recvSel) $('recv-doc').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    each('tr[data-doc]', box, function (tr) {
+      tr.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tr.click(); } };
+    });
+    if (sel) renderRecvDoc(sel);
   }
 
-  function renderMainReceive() {
-    var box = $('receive-body'), st = S.state;
-    if (!st.round) { box.innerHTML = '<div class="card"><h2>ตรวจรับยาจากคลัง</h2><p class="muted">ยังไม่มีรอบเบิก</p></div>'; return; }
-    var rows = mainRecvRows();
-    var status = st.round.received_at ? '<span class="badge ok">ตรวจรับครบแล้ว ' + esc(thDateTime(st.round.received_at)) + '</span>'
-      : '<span class="badge">ยังตรวจรับไม่ครบ</span>';
-    box.innerHTML = '<div class="card">' +
-      '<div class="row"><h2>ตรวจรับยาจากคลัง รอบ ' + thDate(st.round.count_date) + '</h2>' + status + '</div>' +
-      '<p class="muted small">เทียบใบเบิกกับใบจ่ายจากคลัง ใส่จำนวนที่ได้รับจริงทีละรายการ (หน่วยเดียวกับใบเบิก) ได้ครบกด ครบ ' +
-      'หรือกด รับครบทุกรายการที่ยังว่าง แล้วแก้เฉพาะรายการที่ได้ไม่ครบ ใส่วันหมดอายุของยาที่ได้รับ ถ้ามีหลายวันกด + วันหมดอายุ เพิ่ม ' +
-      'เสร็จแล้วกด บันทึกการตรวจรับ' + (st.round.status === 'APPROVED' ? '' : ' (รอบนี้ยังไม่อนุมัติ จำนวนเบิกอาจยังเปลี่ยนได้)') + '</p>' +
-      (rows.length ? '<div class="row"><button class="btn" id="btn-recv-fill" type="button">รับครบทุกรายการที่ยังว่าง</button>' +
-        '<button class="btn primary" id="btn-recv-save" type="button">บันทึกการตรวจรับ</button><span class="spacer"></span>' +
-        '<span id="recv-sum" class="muted small"></span></div><div id="recv-main">' + recvTable('main', st.round.round_id, rows) + '</div>'
-        : '<p class="muted">รอบนี้ยังไม่มีรายการเบิก</p>') +
+  function docListHtml(list, done) {
+    return '<div class="table-wrap"><table class="list"><thead><tr>' +
+      (done ? '<th>ใบรับ</th>' : '') + '<th>ใบเบิก</th><th>จาก</th><th>วันที่เบิก</th><th class="num">รายการ</th>' +
+      (done ? '<th>รับเมื่อ</th><th>ผล</th>' : '<th>ใส่แล้ว</th>') + '</tr></thead><tbody>' +
+      list.map(function (doc) {
+        var rows = recvRows(doc), c = recvCounts(rows);
+        var res = done ? (c.short ? '<span class="badge danger">ขาด ' + c.short + '</span> ' : '') +
+          (c.over ? '<span class="badge warn">เกิน ' + c.over + '</span> ' : '') +
+          (!c.short && !c.over ? '<span class="badge ok">ครบ</span>' : '') : '';
+        return '<tr class="click' + (doc.key === S.recvSel ? ' sel' : '') + '" tabindex="0" data-doc="' + esc(doc.key) + '">' +
+          (done ? '<td class="name">' + esc(doc.receipt_no || '–') + '</td>' : '') +
+          '<td class="name">' + esc(doc.req_no || '–') + '</td><td>' + esc(docFrom(doc)) + '</td><td>' + thDate(doc.date) + '</td>' +
+          '<td class="num">' + doc.lines.length + '</td>' +
+          (done ? '<td>' + esc(thDateTime(doc.received_at)) + ' <span class="muted small">' + esc(doc.received_by) + '</span></td><td>' + res + '</td>'
+            : '<td>' + (rows.length - c.todo) + '/' + rows.length + '</td>') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function renderRecvDoc(doc) {
+    var box = $('recv-doc'), rows = recvRows(doc);
+    var head = '<div class="row"><h2>' + esc(docTitle(doc)) + '</h2><span class="badge">จาก ' + esc(docFrom(doc)) + '</span>' +
+      (doc.receipt_no ? '<span class="badge ok">ใบรับ ' + esc(doc.receipt_no) + '</span>' : '') +
+      '<span class="spacer"></span><span class="muted small">เบิก ' + thDate(doc.date) + (doc.by ? ' · ' + esc(doc.by) : '') + '</span></div>';
+    if (!doc.open) { // confirmed: read only
+      box.innerHTML = '<div class="card">' + head +
+        '<p class="muted small">ยืนยันรับเข้าคลังเมื่อ ' + esc(thDateTime(doc.received_at)) + ' โดย ' + esc(doc.received_by || '–') +
+        ' จำนวนที่ได้รับแก้ไม่ได้แล้ว ยาที่คลังไม่ได้ให้ ถ้ายังต้องการให้เบิกในใบเบิกถัดไป</p>' +
+        '<div class="table-wrap"><table class="plain"><thead><tr><th>#</th><th>รายการ</th><th class="num">ขอ</th><th class="num">ได้รับ</th><th>ผล</th><th>วันหมดอายุ</th></tr></thead><tbody>' +
+        rows.map(function (r, i) {
+          var v = r.val(), dates = S.state.expiry.filter(function (x) { return x.ref === doc.ref && x.drug_id === r.key; });
+          return '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + ' <span class="muted small">' + esc(r.unit) + '</span></td>' +
+            '<td class="num">' + esc(r.reqText) + '</td><td class="num">' + fmt(v) + '</td><td>' + recvBadge(r.req, v) + '</td>' +
+            '<td>' + dates.map(function (x) { return thDate(x.exp_date); }).join(', ') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      return;
+    }
+    box.innerHTML = '<div class="card">' + head +
+      '<p class="muted small">เทียบใบเบิกกับใบจ่ายที่มากับยา ใส่จำนวนที่ได้รับจริงทุกรายการ (หน่วยเดียวกับใบเบิก) ' +
+      'ได้ครบกด ครบ ไม่ได้รับเลยใส่ 0 และใส่วันหมดอายุของยาที่ได้รับ (หลายวันกด + วันหมดอายุ) ' +
+      'กด บันทึกร่าง ได้ทุกเมื่อ ตรวจครบแล้วกด ยืนยันรับเข้าคลัง เพื่อออกเลขใบรับ ' +
+      'ยาที่คลังไม่ได้ให้จะไม่ค้างไว้ ถ้ายังต้องการให้เบิกในใบเบิกถัดไป</p>' +
+      '<div class="row"><button class="btn" type="button" id="recv-fill">รับครบทุกรายการที่ยังว่าง</button>' +
+      '<button class="btn" type="button" id="recv-save">บันทึกร่าง</button>' +
+      '<button class="btn primary" type="button" id="recv-confirm">ยืนยันรับเข้าคลัง</button><span class="spacer"></span>' +
+      '<span id="recv-sum" class="muted small"></span></div>' +
+      '<div id="recv-table">' + recvTable(doc.key, doc.ref, rows) + '</div>' +
+      (doc.source === 'OPD' ? '<div class="row"><button class="btn" type="button" id="recv-oprint">' + icon('printer') + 'พิมพ์ใบขออีกครั้ง</button>' +
+        '<button class="btn danger" type="button" id="recv-ocancel">ยกเลิกใบเบิกนี้</button></div>' : '') +
       '</div>';
-    if (!rows.length) return;
     function sum() {
-      var n = unsaved(S.recv, 'main').length;
+      var n = unsaved(S.recvQty[doc.key], doc.key).length;
       $('recv-sum').textContent = recvSummaryText(recvCounts(rows)) + (n ? ' · ยังไม่บันทึก ' + n + ' รายการ' : '');
     }
-    var fill = wireRecv($('recv-main'), 'main', st.round.round_id, rows, function (k, v) { S.recv[k] = v; }, sum);
-    $('btn-recv-fill').onclick = fill;
-    $('btn-recv-save').onclick = saveReceived;
+    var fill = wireRecv($('recv-table'), doc.key, doc.ref, rows, function (k, v) { (S.recvQty[doc.key] = S.recvQty[doc.key] || {})[k] = v; }, sum);
+    $('recv-fill').onclick = fill;
+    $('recv-save').onclick = function () { saveRecv(doc, this).catch(function () {}); };
+    armed($('recv-confirm'), 'กดอีกครั้งเพื่อยืนยัน (แก้จำนวนไม่ได้อีก)', function (btn) { confirmRecv(doc, btn); });
+    if (doc.source === 'OPD') {
+      $('recv-oprint').onclick = function () { printOpd(doc.ref); };
+      armed($('recv-ocancel'), 'กดอีกครั้งเพื่อยกเลิก', function (btn) { cancelOpd(doc.ref, btn); });
+    }
     sum();
   }
 
-  function saveReceived() {
-    var edits = recvEdits(S.recv, 'main');
-    if (!edits.length) { toast('ยังไม่มีอะไรเปลี่ยน'); return; }
-    var btn = $('btn-recv-save');
-    btn.disabled = true;
-    flushSave().then(function () { return api('apiSaveReceived', S.state.round.round_id, edits); }).then(function (res) {
-      Object.keys(res.lines).forEach(function (id) {
-        S.state.lines[id] = S.state.lines[id] || {};
-        S.state.lines[id].received_qty = res.lines[id];
-      });
-      S.recv = {}; delete S.recvExp.main;
-      S.state.round = res.round;
-      S.state.expiry = res.expiry;
-      renderReceive(); renderShell(); renderHome();
-      toast(res.round.received_at ? 'บันทึกแล้ว ตรวจรับครบทุกรายการ' : 'บันทึกแล้ว ยังมีรายการที่ยังไม่ได้ใส่จำนวน');
+  // Save the typed quantities / expiry dates of a ใบเบิก (resolves when saved or nothing to save).
+  function saveRecv(doc, btn, quiet) {
+    var edits = recvEdits(S.recvQty[doc.key], doc.key);
+    if (!edits.length) { if (!quiet) toast('ยังไม่มีอะไรเปลี่ยน'); return Promise.resolve(); }
+    if (btn) btn.disabled = true;
+    var call = doc.source === 'MAIN' ? api('apiSaveReceived', doc.ref, edits) : api('apiSaveOpdReceived', doc.ref, edits);
+    return call.then(function (res) {
+      if (doc.source === 'MAIN') { replaceMainDoc(res.doc); S.state.expiry = res.expiry; }
+      else { S.state.expiry = res.expiry; delete res.expiry; replaceOpd(res); }
+      delete S.recvQty[doc.key]; delete S.recvExp[doc.key];
+      if (!quiet) { renderReceive(); toast('บันทึกร่างแล้ว'); }
     }).catch(function (e) {
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
       toast('บันทึกไม่สำเร็จ: ' + errMsg(e), true);
+      throw e;
     });
   }
 
-  // OPD requests not yet received: type what OPD handed over.
-  function renderOpdOpen() {
-    var box = $('opd-open');
-    var open = S.state.opd_requests.filter(function (r) { return r.status === 'REQUESTED'; });
-    if (!open.length) { box.innerHTML = '<div class="card"><h2>รับยาจาก OPD</h2><p class="muted small">ไม่มีรายการที่รอรับ</p></div>'; return; }
-    var dm = drugMap();
-    var html = '<div class="card"><h2>รับยาจาก OPD</h2>' +
-      '<p class="muted small">เมื่อได้ยาจาก OPD ใส่จำนวนที่ได้รับจริงและวันหมดอายุ ได้ครบกด ครบ แล้วกด บันทึกการรับ</p>';
-    var rowsBy = {};
-    open.forEach(function (r) {
-      var typed = S.recvOpd[r.request_id] || {};
-      var rows = rowsBy[r.request_id] = r.lines.map(function (l) {
-        var d = dm[l.drug_id];
-        return { key: l.drug_id, name: drugLabel(d) || l.drug_id, unit: d ? d.unit : '', req: l.qty, reqText: fmt(l.qty, 0),
-          val: function () { return typed[this.key] !== undefined ? typed[this.key] : l.received_qty; } };
-      });
-      html += '<div class="opd-req" data-req="' + esc(r.request_id) + '">' +
-        '<div class="row"><b>ขอวันที่ ' + thDate(r.request_date) + '</b><span class="badge' + (r.kind === 'URGENT' ? ' warn' : '') + '">' +
-        esc(KIND_TEXT[r.kind] || r.kind) + '</span><span class="muted small">' + r.lines.length + ' รายการ · ' + esc(r.requested_by) + '</span><span class="spacer"></span>' +
-        '<button class="btn" type="button" data-oprint>' + icon('printer') + 'พิมพ์อีกครั้ง</button>' +
-        '<button class="btn danger" type="button" data-ocancel>ยกเลิก</button></div>' +
-        '<div data-otable>' + recvTable(r.request_id, r.request_id, rows) + '</div>' +
-        '<div class="row"><button class="btn" type="button" data-ofill>รับครบทุกรายการที่ยังว่าง</button>' +
-        '<button class="btn primary" type="button" data-osave>บันทึกการรับ</button><span class="spacer"></span>' +
-        '<span class="muted small" data-osum></span></div></div>';
+  function confirmRecv(doc, btn) {
+    btn.disabled = true;
+    saveRecv(doc, null, true).then(function () {
+      return doc.source === 'MAIN' ? api('apiConfirmReceipt', doc.ref) : api('apiConfirmOpdReceipt', doc.ref);
+    }).then(function (res) {
+      if (doc.source === 'MAIN') {
+        replaceMainDoc(res);
+        if (S.state.round && S.state.round.round_id === res.round_id) {
+          ['receipt_no', 'received_at', 'received_by'].forEach(function (k) { S.state.round[k] = res[k]; });
+        }
+      } else replaceOpd(res);
+      renderReceive(); renderOpd(); renderShell(); renderHome();
+      toast('ยืนยันรับเข้าคลังแล้ว ใบรับเลขที่ ' + res.receipt_no);
+    }).catch(function (e) {
+      btn.disabled = false;
+      renderReceive();
+      toast('ยืนยันไม่สำเร็จ: ' + errMsg(e), true);
     });
-    box.innerHTML = html + '</div>';
-    each('.opd-req', box, function (el) {
-      var id = el.getAttribute('data-req'), rows = rowsBy[id];
-      function sum() {
-        var n = unsaved(S.recvOpd[id], id).length;
-        el.querySelector('[data-osum]').textContent = recvSummaryText(recvCounts(rows)) + (n ? ' · ยังไม่บันทึก ' + n + ' รายการ' : '');
-      }
-      var fill = wireRecv(el.querySelector('[data-otable]'), id, id, rows, function (k, v) { (S.recvOpd[id] = S.recvOpd[id] || {})[k] = v; }, sum);
-      el.querySelector('[data-ofill]').onclick = fill;
-      el.querySelector('[data-osave]').onclick = function () { saveOpdReceived(id, this); };
-      el.querySelector('[data-oprint]').onclick = function () { printOpd(id); };
-      armed(el.querySelector('[data-ocancel]'), 'กดอีกครั้งเพื่อยกเลิก', function (btn) { cancelOpd(id, btn); });
-      sum();
-    });
+  }
+
+  function replaceMainDoc(doc) {
+    var list = S.state.main_docs = S.state.main_docs || [];
+    for (var i = 0; i < list.length; i++) if (list[i].round_id === doc.round_id) { list[i] = doc; break; }
+    if (i === list.length) list.unshift(doc);
+    // the current round's lines (stock card, count list) follow what was saved
+    if (S.state.round && S.state.round.round_id === doc.round_id) {
+      doc.lines.forEach(function (l) { var x = S.state.lines[l.drug_id]; if (x) x.received_qty = l.received_qty; });
+    }
   }
 
   function replaceOpd(req) {
@@ -1242,27 +1314,13 @@
     list.unshift(req);
   }
 
-  function saveOpdReceived(id, btn) {
-    var edits = recvEdits(S.recvOpd[id], id);
-    if (!edits.length) { toast('ยังไม่มีอะไรเปลี่ยน'); return; }
-    btn.disabled = true;
-    api('apiSaveOpdReceived', id, edits).then(function (req) {
-      S.state.expiry = req.expiry;
-      delete req.expiry;
-      replaceOpd(req);
-      delete S.recvOpd[id]; delete S.recvExp[id];
-      renderReceive(); renderOpd(); renderShell(); renderHome();
-      toast(req.status === 'RECEIVED' ? 'บันทึกแล้ว รับครบทุกรายการ' : 'บันทึกแล้ว ยังมีรายการที่ยังไม่ได้ใส่จำนวน');
-    }).catch(function (e) { btn.disabled = false; toast('บันทึกไม่สำเร็จ: ' + errMsg(e), true); });
-  }
-
   function cancelOpd(id, btn) {
     btn.disabled = true;
     api('apiCancelOpdRequest', id).then(function (req) {
       var old = S.state.opd_requests.filter(function (r) { return r.request_id === id; })[0];
       req.lines = old ? old.lines : [];
       replaceOpd(req);
-      delete S.recvOpd[id]; delete S.recvExp[id];
+      delete S.recvQty['OPD:' + id]; delete S.recvExp['OPD:' + id];
       renderReceive(); renderOpd(); renderShell(); renderHome();
       toast('ยกเลิกรายการขอแล้ว');
     }).catch(function (e) { btn.disabled = false; toast('ยกเลิกไม่สำเร็จ: ' + errMsg(e), true); });
@@ -1356,7 +1414,8 @@
           : short.length ? '<span class="badge danger">ได้ไม่ครบ ' + short.length + ' รายการ</span> <span class="muted small">' +
             esc(short.map(function (l) { return drugLabel(dm[l.drug_id]) || l.drug_id; }).join(', ')) + '</span>'
           : '<span class="badge ok">ครบ</span>';
-        return '<tr><td>' + thDate(r.request_date) + '</td><td>' + esc(KIND_TEXT[r.kind] || r.kind) + '</td><td class="num">' +
+        return '<tr><td>' + thDate(r.request_date) + (r.req_no ? ' <span class="muted small">' + esc(r.req_no) + '</span>' : '') +
+          '</td><td>' + esc(KIND_TEXT[r.kind] || r.kind) + '</td><td class="num">' +
           r.lines.length + '</td><td>' + res + '</td><td>' + (r.status === 'CANCELLED' ? '' : '<button class="btn small" type="button" data-hprint="' + esc(r.request_id) + '">' + icon('printer') + 'พิมพ์</button>') + '</td></tr>';
       }).join('') + '</tbody></table></div></div>';
     each('[data-hprint]', box, function (b) { b.onclick = function () { printOpd(b.getAttribute('data-hprint')); }; });
@@ -1372,7 +1431,7 @@
       S.opdSel = {}; S.opdQty = {}; store('opdSel', {}); store('opdQty', {});
       btn.disabled = false;
       renderOpd(); renderReceive(); renderShell(); renderHome();
-      toast('บันทึกแล้ว เมื่อได้ยาให้ตรวจรับที่เมนู ตรวจรับยา');
+      toast('บันทึกแล้ว' + (req.req_no ? ' ใบเบิกเลขที่ ' + req.req_no : '') + ' เมื่อได้ยาให้ตรวจรับที่เมนู ตรวจรับยา');
       printOpd(req.request_id);
     }).catch(function (e) { btn.disabled = false; toast('บันทึกไม่สำเร็จ: ' + errMsg(e), true); });
   }
@@ -1389,7 +1448,8 @@
     if (!req) return;
     var dm = drugMap();
     printHtml('<div class="opd-page"><h1>รายการขอยาจากห้องยา OPD (' + esc(KIND_TEXT[req.kind] || req.kind) + ')</h1>' +
-      '<div class="row small" style="justify-content:space-between"><span>จาก ห้องยาผู้ป่วยใน (IPD)</span><span>วันที่ ' + thDate(req.request_date) + '</span></div>' +
+      '<div class="row small" style="justify-content:space-between"><span>จาก ห้องยาผู้ป่วยใน (IPD)</span>' +
+      (req.req_no ? '<span>เลขที่ ' + esc(req.req_no) + '</span>' : '') + '<span>วันที่ ' + thDate(req.request_date) + '</span></div>' +
       '<table><thead><tr><th style="width:9%">ลำดับ</th><th>รายการ</th><th style="width:13%">จำนวน</th><th style="width:13%">หน่วย</th>' +
       '<th style="width:13%">จ่ายจริง</th><th style="width:11%">หมายเหตุ</th></tr></thead><tbody>' +
       req.lines.map(function (l, i) {
@@ -1787,7 +1847,7 @@
     $('btn-log-refresh').onclick = loadLog;
 
     window.addEventListener('beforeunload', function (e) {
-      var typed = Object.keys(S.recv).length || Object.keys(S.recvOpd).length || Object.keys(S.recvExp).length;
+      var typed = Object.keys(S.recvQty).length || Object.keys(S.recvExp).length;
       if (Object.keys(S.pending).length) { flushSave(); e.preventDefault(); e.returnValue = ''; }
       else if (typed) { e.preventDefault(); e.returnValue = ''; }
     });

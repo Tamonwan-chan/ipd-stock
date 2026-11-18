@@ -80,7 +80,9 @@ var Schema = (function () {
         ['approved_at', 'datetime'],
         ['note', 'string'],
         ['received_at', 'datetime'],
-        ['received_by', 'string']
+        ['received_by', 'string'],
+        ['req_no', 'string'],     // ใบเบิก number, given at approval (บ.69/0001)
+        ['receipt_no', 'string']  // ใบรับ number, given when the delivery check is confirmed (ร.69/0001)
       ])
     },
     RoundLines: {
@@ -110,7 +112,9 @@ var Schema = (function () {
         ['requested_by', 'string'],
         ['received_at', 'datetime'],
         ['received_by', 'string'],
-        ['note', 'string']
+        ['note', 'string'],
+        ['req_no', 'string'],     // same series as Rounds.req_no
+        ['receipt_no', 'string']  // same series as Rounds.receipt_no
       ])
     },
     OpdLines: {

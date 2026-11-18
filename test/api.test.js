@@ -195,7 +195,9 @@ test('saveLines: blank count is "not counted", unknown drug fails', () => {
   assert.throws(() => Api.saveLines('nope', [], ss), /ไม่พบรอบ/);
 });
 
-test('saveReceived: delivery from main storage, line by line; round marked received when complete', () => {
+const YY = String(new Date().getFullYear() + 543).slice(2); // document numbers: บ.69/0001, ร.69/0001
+
+test('main-storage ใบเบิก: number at approval, draft check, ใบรับ number at confirm, then locked', () => {
   const ss = setup();
   const r = Api.startRound(ss);
   const st = Api.state(null, ss);
@@ -205,27 +207,47 @@ test('saveReceived: delivery from main storage, line by line; round marked recei
     { drug_id: busy.drug_id, on_hand: 0, final_qty: '' },      // suggestion > 0
     { drug_id: kcl.drug_id, on_hand: 0, final_qty: 3 },
   ], ss);
-  Api.approveRound(r.round_id, ss); // receiving happens after approval
+  // not approved yet: not on the delivery list, can't be checked
+  assert.deepEqual(Api.state(null, ss).main_docs, []);
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss), /ยังไม่อนุมัติ/);
+  assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยังไม่อนุมัติ/);
 
+  const approved = Api.approveRound(r.round_id, ss);
+  assert.equal(approved.req_no, 'บ.' + YY + '/0001');
+  assert.throws(() => Api.approveRound(r.round_id, ss), /อนุมัติแล้ว/);
+  let docs = Api.state(null, ss).main_docs;
+  assert.deepEqual(docs.map(d => [d.req_no, d.receipt_no, d.lines.length]), [['บ.' + YY + '/0001', '', 2]]);
+
+  // draft: saving doesn't finish the check
   let res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: '2' }], ss);
-  assert.equal(res.lines[kcl.drug_id], 2);
-  assert.equal(res.round.received_at, ''); // Busy tab not checked yet
+  assert.equal(res.doc.lines.find(l => l.drug_id === kcl.drug_id).received_qty, 2);
+  assert.equal(res.doc.received_at, '');
+  assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยังไม่ได้ใส่จำนวนที่ได้รับ 1 รายการ/);
+  Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 0 }], ss); // nothing came: 0
+  assert.equal(Api.state(r.round_id, ss).round.received_at, '');
 
-  res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: busy.par }], ss);
-  assert.notEqual(res.round.received_at, '');
-  const st2 = Api.state(r.round_id, ss);
-  assert.equal(st2.lines[kcl.drug_id].received_qty, 2);
-  assert.notEqual(st2.round.received_at, '');
-
-  // clearing a line reopens the check
-  res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: '' }], ss);
-  assert.equal(res.round.received_at, '');
+  const doc = Api.confirmReceipt(r.round_id, ss);
+  assert.equal(doc.receipt_no, 'ร.' + YY + '/0001');
+  assert.notEqual(doc.received_at, '');
+  assert.equal(Api.state(r.round_id, ss).lines[kcl.drug_id].received_qty, 2);
+  assert.match(Api.changeLog(1, ss)[0].detail, /ใบเบิก บ\.\d\d\/0001: ครบ 0, ขาด 2/);
+  // locked: quantities can't change, expiry dates can still be fixed
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss), /แก้จำนวนที่ได้รับไม่ได้/);
+  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 2, exp: ['2027-05-31'] }], ss);
+  assert.throws(() => Api.confirmReceipt(r.round_id, ss), /ยืนยันรับเข้าคลังแล้ว/);
 
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: -1 }], ss), /ไม่ถูกต้อง/);
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: 'D999', received_qty: 1 }], ss), /ไม่ได้เบิก/);
+
+  // the next approved round takes the next number; received ones stay listed after the open ones
+  const r2 = Api.startRound(ss);
+  Api.saveLines(r2.round_id, [{ drug_id: kcl.drug_id, on_hand: 0, final_qty: 1 }], ss);
+  assert.equal(Api.approveRound(r2.round_id, ss).req_no, 'บ.' + YY + '/0002');
+  docs = Api.state(null, ss).main_docs;
+  assert.deepEqual(docs.map(d => [d.req_no, !!d.received_at]), [['บ.' + YY + '/0002', false], ['บ.' + YY + '/0001', true]]);
 });
 
-test('saveReceived: a line with nothing to request is not part of the check', () => {
+test('saveReceived: a line with nothing to request is not part of the check; nothing requested = no ใบเบิก number', () => {
   const ss = setup();
   const r = Api.startRound(ss);
   const st = Api.state(null, ss);
@@ -235,12 +257,17 @@ test('saveReceived: a line with nothing to request is not part of the check', ()
     { drug_id: busy.drug_id, on_hand: 9999, final_qty: '' }, // full: suggestion 0
     { drug_id: kcl.drug_id, on_hand: 0, final_qty: 3 },
   ], ss);
+  Api.approveRound(r.round_id, ss);
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่ได้เบิก/);
-  const res = Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss);
-  assert.notEqual(res.round.received_at, '');
+  Api.saveReceived(r.round_id, [{ drug_id: kcl.drug_id, received_qty: 3 }], ss);
+  assert.match(Api.confirmReceipt(r.round_id, ss).receipt_no, /^ร\./);
+
+  const r2 = Api.startRound(ss);
+  Api.saveLines(r2.round_id, [{ drug_id: busy.drug_id, on_hand: 9999, final_qty: '' }], ss);
+  assert.equal(Api.approveRound(r2.round_id, ss).req_no, '');
 });
 
-test('OPD requests: save, receive line by line, cancel; tabs created in an older Sheet', () => {
+test('OPD requests: ใบเบิก number when saved, draft receive, confirm gives the ใบรับ number, cancel', () => {
   const ss = setup();
   // Sheet from before 18 Nov: no OPD tabs
   ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdRequests' && sh.name !== 'OpdLines');
@@ -255,16 +282,22 @@ test('OPD requests: save, receive line by line, cancel; tabs created in an older
   ], '', ss);
   assert.match(req.request_id, /^OPD-\d{4}-\d{2}-\d{2}$/);
   assert.equal(req.status, 'REQUESTED');
+  assert.equal(req.req_no, 'บ.' + YY + '/0001');
   assert.deepEqual(req.lines, [{ drug_id: slow.drug_id, qty: 15, received_qty: '' }]);
 
-  // an urgent fetch the same day for a main-storage drug that ran low
+  // an urgent fetch the same day for a main-storage drug that ran low; same number series
   const urgent = Api.createOpdRequest('URGENT', [{ drug_id: busy.drug_id, qty: 20 }], '', ss);
   assert.equal(urgent.request_id, req.request_id + '-2');
+  assert.equal(urgent.req_no, 'บ.' + YY + '/0002');
 
+  assert.throws(() => Api.confirmOpdReceipt(req.request_id, ss), /ยังไม่ได้ใส่จำนวนที่ได้รับ 1 รายการ/);
   let got = Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, received_qty: 10 }], ss);
-  assert.equal(got.status, 'RECEIVED');
-  assert.notEqual(got.received_at, '');
+  assert.equal(got.status, 'REQUESTED'); // a draft until confirmed
   assert.equal(got.lines[0].received_qty, 10);
+  got = Api.confirmOpdReceipt(req.request_id, ss);
+  assert.deepEqual([got.status, got.receipt_no], ['RECEIVED', 'ร.' + YY + '/0001']);
+  assert.notEqual(got.received_at, '');
+  assert.throws(() => Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, received_qty: 15 }], ss), /แก้จำนวนที่ได้รับไม่ได้/);
 
   st = Api.state(null, ss);
   assert.deepEqual(st.opd_requests.map(r => [r.request_id, r.status]),
@@ -273,6 +306,7 @@ test('OPD requests: save, receive line by line, cancel; tabs created in an older
 
   assert.equal(Api.cancelOpdRequest(urgent.request_id, ss).status, 'CANCELLED');
   assert.throws(() => Api.saveOpdReceived(urgent.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ยกเลิกแล้ว/);
+  assert.throws(() => Api.confirmOpdReceipt(urgent.request_id, ss), /ยกเลิกแล้ว/);
   assert.throws(() => Api.cancelOpdRequest(req.request_id, ss), /รับยาแล้ว/);
   assert.throws(() => Api.createOpdRequest('WEEKLY', [{ drug_id: slow.drug_id, qty: 1 }], '', ss), /ประเภท/);
   assert.throws(() => Api.createOpdRequest('URGENT', [{ drug_id: slow.drug_id, qty: 0 }], '', ss), /ยังไม่มีรายการ/);
@@ -303,7 +337,7 @@ test('change log: counts are logged once at approval, not on every autosave', ()
   Api.approveRound(r.round_id, ss);
   const log = Api.changeLog(3, ss); // newest first
   assert.deepEqual(log.map(x => [x.user, x.action]), [['Pharmacist B', 'อนุมัติรอบ'], ['Pharmacist B', 'นับ/เบิก'], ['Pharmacist B', 'นับ/เบิก']]);
-  assert.equal(log[0].detail, 'นับ 2 รายการ, เบิก 1 รายการ');
+  assert.equal(log[0].detail, 'ใบเบิก บ.' + YY + '/0001: นับ 2 รายการ, เบิก 1 รายการ');
   const busyRow = log.find(x => x.target === 'Busy tab 10 mg.');
   assert.match(busyRow.detail, /คงเหลือ 12; ควรเบิก \d+; เบิกจริง 200/);
   assert.equal(Db.readTable('Rounds', ss)[0].counted_by, 'Nurse A');
@@ -316,13 +350,14 @@ test('expiry dates at the delivery check: several per line, corrected, removed f
   const r = Api.startRound(ss);
   const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
   Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: 100 }], ss);
+  Api.approveRound(r.round_id, ss);
   let res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 100, exp: ['2027-06-30', '2027-03-31', ''] }], ss);
   assert.deepEqual(res.expiry.map(x => x.exp_date), ['2027-03-31', '2027-06-30']); // sorted, blanks ignored
   assert.equal(res.expiry[0].source, 'MAIN');
   // a typo fixed: 2027-06-30 was really 2027-07-31; quantity untouched when not sent
   res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, exp: ['2027-03-31', '2027-07-31'] }], ss);
   assert.deepEqual(res.expiry.map(x => x.exp_date), ['2027-03-31', '2027-07-31']);
-  assert.equal(res.lines[busy.drug_id], 100);
+  assert.equal(res.doc.lines[0].received_qty, 100);
   assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, exp: ['31/03/2027'] }], ss), /วันหมดอายุไม่ถูกต้อง/);
   // the lot dated March is used up
   const left = Api.removeExpiry(r.round_id, busy.drug_id, '2027-03-31', ss);
@@ -342,6 +377,7 @@ test('drugCard: counts, requests and deliveries from both sources, newest first'
   const r = Api.startRound(ss);
   const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
   Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 10, final_qty: 2, boxes: 2, pack_size: 1 }], ss);
+  Api.approveRound(r.round_id, ss);
   Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 2, exp: ['2027-01-31'] }], ss);
   Api.createOpdRequest('URGENT', [{ drug_id: busy.drug_id, qty: 20 }], '', ss);
   const c = Api.drugCard(busy.drug_id, ss);
