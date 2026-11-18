@@ -35,6 +35,7 @@ var Schema = (function () {
         ['request_unit', 'string'],
         ['request_factor', 'number'],
         ['request_name', 'string'],
+        ['pack_size', 'number'],
         ['source', 'string'],
         ['item_code', 'string'],
         ['unit_price', 'number'],
@@ -67,7 +68,9 @@ var Schema = (function () {
         ['submitted_at', 'datetime'],
         ['reviewed_by', 'string'],
         ['approved_at', 'datetime'],
-        ['note', 'string']
+        ['note', 'string'],
+        ['received_at', 'datetime'],
+        ['received_by', 'string']
       ])
     },
     RoundLines: {
@@ -79,8 +82,34 @@ var Schema = (function () {
         ['par_used', 'number'],
         ['suggested_qty', 'number'],
         ['final_qty', 'number'],
+        ['boxes', 'number'],
+        ['pack_size', 'number'],
         ['change_reason', 'string'],
-        ['flags', 'string']
+        ['flags', 'string'],
+        ['received_qty', 'number']
+      ])
+    },
+    // Requests to the OPD pharmacy: the monthly list, or an urgent fetch when a drug runs low.
+    OpdRequests: {
+      key: ['request_id'],
+      columns: cols([
+        ['request_id', 'string'],
+        ['request_date', 'date'],
+        ['kind', 'string'],
+        ['status', 'string'],
+        ['requested_by', 'string'],
+        ['received_at', 'datetime'],
+        ['received_by', 'string'],
+        ['note', 'string']
+      ])
+    },
+    OpdLines: {
+      key: ['request_id', 'drug_id'],
+      columns: cols([
+        ['request_id', 'string'],
+        ['drug_id', 'string'],
+        ['qty', 'number'],
+        ['received_qty', 'number']
       ])
     },
     Users: {
@@ -103,7 +132,7 @@ var Schema = (function () {
   };
 
   /** Tab order when creating the spreadsheet. */
-  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'Users', 'Import'];
+  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Users', 'Import'];
 
   /** Allowed values for coded columns. */
   var ENUMS = {
@@ -111,6 +140,8 @@ var Schema = (function () {
     source_calc: ['MAIN', 'OPD'],
     location: ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา'],
     status: ['COUNTING', 'REVIEW', 'APPROVED'],
+    kind: ['MONTHLY', 'URGENT'],
+    opd_status: ['REQUESTED', 'RECEIVED', 'CANCELLED'],
     role: ['counter', 'pharmacist', 'admin']
   };
 

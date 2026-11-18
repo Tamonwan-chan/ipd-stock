@@ -115,6 +115,17 @@ test('calcPar: no usage gives par 0 with source none', () => {
   assert.deepEqual([r.par, r.source], [0, 'none']);
 });
 
+test('boxQty: boxes × units per box, only when both are usable', () => {
+  assert.equal(Calc.boxQty(1, 1000), 1000);
+  assert.equal(Calc.boxQty('2', '500'), 1000);
+  assert.equal(Calc.boxQty(0, 500), 0);
+  assert.equal(Calc.boxQty(3, 0.1), 0.3); // no float noise
+  assert.equal(Calc.boxQty('', 1000), null);
+  assert.equal(Calc.boxQty(1, ''), null);
+  assert.equal(Calc.boxQty(1, 0), null);
+  assert.equal(Calc.boxQty(-1, 10), null);
+});
+
 test('suggestOrder: units, no rounding', () => {
   assert.deepEqual(Calc.suggestOrder(18, 5, ''), { counted: true, onHand: 5, shortfall: 13, qty: 13 });
   assert.equal(Calc.suggestOrder(18, 30, 1).qty, 0);

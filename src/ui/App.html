@@ -18,8 +18,9 @@
     <button role="tab" data-tab="import">1. นำเข้าข้อมูลการใช้ยา</button>
     <button role="tab" data-tab="count">2. นับยาและคำนวณยอดเบิก</button>
     <button role="tab" data-tab="form">3. ใบเบิก (คลัง)</button>
-    <button role="tab" data-tab="opd">4. ขอจาก OPD</button>
-    <button role="tab" data-tab="minmax">5. ป้ายสูงสุด/ต่ำสุด</button>
+    <button role="tab" data-tab="receive">4. ตรวจรับจากคลัง</button>
+    <button role="tab" data-tab="opd">5. ขอ/รับยาจาก OPD</button>
+    <button role="tab" data-tab="minmax">6. ป้ายสูงสุด/ต่ำสุด</button>
   </nav>
 
   <main>
@@ -67,25 +68,36 @@
       <div id="form-pages" class="paper-wrap"></div>
     </section>
 
-    <!-- 4. OPD -->
+    <!-- 4. Delivery check, main storage -->
+    <section id="tab-receive" class="tab" hidden>
+      <div id="receive-body"></div>
+    </section>
+
+    <!-- 5. OPD: request and receive -->
     <section id="tab-opd" class="tab" hidden>
+      <div id="opd-open" class="no-print"></div>
       <div class="card no-print">
-        <h2>รายการขอยาจากห้องยา OPD</h2>
+        <h2>ขอยาจากห้องยา OPD</h2>
         <p class="muted small">ยาที่ใช้ไม่บ่อย (น้อยกว่าสัปดาห์ละครั้ง) และยาราคาสูงที่ใช้ไม่บ่อย ไม่ต้องสต็อก ให้ไปขอจาก OPD เดือนละครั้ง
-          เลือกเฉพาะรายการที่จะขอ จำนวนที่แนะนำ = ใช้เฉลี่ยใน <span id="opd-cycle-days">30</span> วัน (แก้ได้)</p>
+          เลือกเฉพาะรายการที่จะขอ จำนวนที่แนะนำ = ใช้เฉลี่ยใน <span id="opd-cycle-days">30</span> วัน (แก้ได้)
+          ยาที่เบิกคลังแต่เหลือต่ำกว่า min ให้ติ๊ก แสดงยาที่เบิกคลังด้วย แล้วใส่จำนวนที่จะขอ (ประเภท ด่วน)
+          กด บันทึกและพิมพ์ แล้วเมื่อได้ยามา ให้ใส่จำนวนที่ได้รับในส่วน รอรับจาก OPD</p>
         <div class="row">
           <input type="search" id="opd-search" placeholder="ค้นหายา">
+          <label class="check small"><input type="checkbox" id="opd-all"> แสดงยาที่เบิกคลังด้วย</label>
           <button class="btn" id="btn-opd-clear">ล้างที่เลือก</button>
           <span class="spacer"></span>
-          <button class="btn primary" id="btn-print-opd">พิมพ์รายการ</button>
+          <label class="small">ประเภท <select id="opd-kind"><option value="MONTHLY">ประจำเดือน</option><option value="URGENT">ด่วน (ยาใกล้หมด)</option></select></label>
+          <button class="btn primary" id="btn-save-opd">บันทึกและพิมพ์</button>
           <button class="btn" id="btn-copy-opd">คัดลอก</button>
         </div>
         <div id="opd-list"></div>
       </div>
+      <div id="opd-history" class="no-print"></div>
       <div id="opd-print"></div>
     </section>
 
-    <!-- 5. Min/max shelf list -->
+    <!-- 6. Min/max shelf list -->
     <section id="tab-minmax" class="tab" hidden>
       <div class="card no-print">
         <h2>ป้ายยอดสูงสุด / ต่ำสุด สำหรับติดที่ชั้นยา</h2>

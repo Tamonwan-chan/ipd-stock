@@ -62,6 +62,22 @@ test('ensureSchema: adds missing columns at the end, keeps order and data', () =
   assert.deepEqual(strip(Db.readTable('Users', ss)), [{ name: 'Somchai', email: 'a@example.com', role: '' }]);
 });
 
+test('ensureColumns: adds the missing columns of one tab, formatted; no-op when complete', () => {
+  const ss = fresh();
+  assert.deepEqual(Db.ensureColumns('Rounds', ss), []);
+  const sh = ss.getSheetByName('Users');
+  sh.grid = [['email', 'name']];
+  sh.formats = {};
+  assert.deepEqual(Db.ensureColumns('Users', ss), ['role']);
+  assert.deepEqual(sh.dump()[0], ['email', 'name', 'role']);
+  assert.equal(sh.formats[3], '@');
+  assert.throws(() => Db.ensureColumns('Nope', ss), /Unknown table|not found/);
+  // a tab that doesn't exist yet is created with its header
+  ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdLines');
+  assert.deepEqual(Db.ensureColumns('OpdLines', ss), Schema.columnNames('OpdLines'));
+  assert.equal(ss.getSheetByName('OpdLines').frozenRows, 1);
+});
+
 test('appendRows / readTable: round trip by type, blanks, _row', () => {
   const ss = fresh();
   Db.appendRows('Drugs', [

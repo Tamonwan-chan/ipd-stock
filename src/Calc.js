@@ -337,6 +337,17 @@ var Calc = (function () {
   }
 
   /**
+   * Quantity of a line typed as whole boxes: boxes × units per box (request units).
+   * Pack sizes are typed by staff each round and never used for the suggestion itself.
+   * @return {number|null}  null unless boxes ≥ 0 and packSize > 0
+   */
+  function boxQty(boxes, packSize) {
+    var b = toNumber(boxes), p = toNumber(packSize);
+    if (b === null || b < 0 || p === null || p <= 0) return null;
+    return Math.round(b * p * 1e6) / 1e6;
+  }
+
+  /**
    * Review flags for one round line.
    * @param {{critical?:boolean, stocked?:boolean}} drug
    * @param {{par:number, source:string, mean:number, min?:number}} parInfo  min in HOSxP units (minFromStored)
@@ -445,6 +456,7 @@ var Calc = (function () {
     classifyDrug: classifyDrug,
     stockDecision: stockDecision,
     suggestOrder: suggestOrder,
+    boxQty: boxQty,
     lineFlags: lineFlags,
     opdSuggestion: opdSuggestion,
     mainFormLine: mainFormLine,
