@@ -41,7 +41,7 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font: 15px/1.5 'Sarabun', system-ui, sans-serif;
+    font: 15px/1.55 'IBM Plex Sans Thai', 'Segoe UI', system-ui, sans-serif;
   }
   button, input, select { font: inherit; color: inherit; }
   h1, h2, h3 { margin: 0; line-height: 1.25; }
@@ -319,6 +319,7 @@
 
   /* Printing: only #print-area (filled by printHtml) goes on paper. */
   @media screen { #print-area { display: none; } }
+  #print-area { font-family: 'Sarabun', system-ui, sans-serif; } /* paper forms keep Sarabun */
   @media print {
     @page { size: A4; margin: 8mm; }
     body { background: #fff; }
