@@ -107,8 +107,8 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `min_par` | 10 | floor for par (e.g. emergency-box quantity). Not the same as the shelf min below |
 | `par_override` | | pharmacist's manual par; wins when set |
 | `min_override` | | pharmacist's manual shelf min (ยอดต่ำสุด); wins when set, 0 turns the warning off |
-| `location` | ตู้เก็บยา | ตู้เก็บยา / ชั้นวางยา / ลิ้นชักยา |
-| `shelf_order` | 120 | walking order for counting |
+| `location` | ตู้เก็บยา | optional: ตู้เก็บยา / ชั้นวางยา / ลิ้นชักยา. Parked (#12): not raised with staff unless they ask; while no stocked drug has one, lists show no place headings |
+| `shelf_order` | 120 | optional walking order within a place (#12) |
 | `use_freq` | 0.95 | share of days used in history (written by recompute) |
 | `source_calc` | OPD | use-frequency rule result, `MAIN` or `OPD` (written by recompute) |
 | `par_calc` | 36 | written by recompute |
@@ -280,7 +280,6 @@ One page (`ui/App.html`) with five tabs:
 
 1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
 2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. Optional `กล่อง` × `ต่อกล่อง` (boxes × units per box, the two inputs after `เบิกจริง`) fills `เบิกจริง`; units per box is prefilled with the last value typed for the drug, and a `เบิกจริง` typed by hand that no longer matches clears the boxes. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
-   **จัดที่เก็บยา** opens an arranging view (18 Nov) so staff set `location` and `shelf_order` themselves instead of the owner typing them: pick the place being arranged, search each drug in the order it sits on the shelf and tap ＋ to append it to that place (`shelf_order` = last + 10); ↑ ↓ swap neighbours and renumber the place 10, 20, 30…; a per-row picker moves a drug to another place or back to not set. Each tap saves through `Api.saveLocations` (place names checked against `Schema.ENUMS.location`). Places sort in that list's order (ตู้เก็บยา, ชั้นวางยา, ลิ้นชักยา), places typed by hand after them, not set last.
 3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Lines requested by box show `boxes x pack_size` under จำนวนเบิกใหม่ and the box count under จ่ายหรือรับคืน. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
 4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = average use over `opd_cycle_days` (a month); tick lines, print or copy. Ticks are remembered in the browser only.
 5. **ป้ายสูงสุด/ต่ำสุด**: printable A4 list of every stocked drug by location with max and min in request units (rounded up), plus CSV. Reprint after each import, since both numbers change.
@@ -345,7 +344,7 @@ Open:
 2. ~~Lead time~~ resolved above.
 3. ~~Delivery delay~~ resolved above (5 days).
 4. ~~Bottle sizes~~ resolved above. Adrenaline 1 mg/ml: 1 ml = 1 ampoule.
-5. **Multiple locations.** Is any drug kept in more than one place? If yes, counting needs one row per drug-location.
+5. ~~Multiple locations~~ parked with shelf places (#12): only if staff ask.
 6. **Drug code.** Can IT add HOSxP `icode` to the export? Names change and have typos; a code is a safer key.
 7. **Expensive, infrequent drugs.** IPD pharmacist (17 Nov): keep about 5 days of use at the maximum dose per drug. Draft table in #5, waiting for the pharmacist; enter the result as `par_override` (`min_par` is only a floor) (§5.2).
 8. ~~Pack sizes~~ not used in the calculation (#2, closed). Optional whole-box lines typed by staff since 18 Nov (§6).

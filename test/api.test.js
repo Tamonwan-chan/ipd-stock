@@ -185,29 +185,6 @@ test('saveLines: blank count is "not counted", unknown drug fails', () => {
   assert.throws(() => Api.saveLines('nope', [], ss), /ไม่พบรอบ/);
 });
 
-test('saveLocations: writes location and shelf_order, checks the place name', () => {
-  const ss = setup();
-  const st = Api.state(null, ss);
-  assert.deepEqual(st.locations, ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา']);
-  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
-  const kcl = st.drugs.find(x => x.critical);
-  assert.equal(Api.saveLocations([
-    { drug_id: busy.drug_id, location: 'ชั้นวางยา', shelf_order: 20 },
-    { drug_id: kcl.drug_id, location: 'ชั้นวางยา', shelf_order: '10' },
-  ], ss), 2);
-  let d = Object.fromEntries(Api.state(null, ss).drugs.map(x => [x.drug_id, x]));
-  assert.deepEqual([d[busy.drug_id].location, d[busy.drug_id].shelf_order], ['ชั้นวางยา', 20]);
-  assert.equal(d[kcl.drug_id].shelf_order, 10);
-
-  // back to "not set": the order is cleared too
-  Api.saveLocations([{ drug_id: busy.drug_id, location: '', shelf_order: 30 }], ss);
-  d = Object.fromEntries(Api.state(null, ss).drugs.map(x => [x.drug_id, x]));
-  assert.deepEqual([d[busy.drug_id].location, d[busy.drug_id].shelf_order], ['', null]);
-
-  assert.throws(() => Api.saveLocations([{ drug_id: busy.drug_id, location: 'ตู้เย็น', shelf_order: 1 }], ss), /ไม่รู้จักที่เก็บ/);
-  assert.throws(() => Api.saveLocations([{ drug_id: 'D999', location: '', shelf_order: '' }], ss), /ไม่พบยา/);
-});
-
 test('ui/Client.html: script parses', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/ui/Client.html'), 'utf8');
   const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
