@@ -28,7 +28,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 | Pharmacist reviews but often can't check every line (Q8) | Review screen shows **exceptions first** |
 | IPD requests from main storage every 2 weeks, independent of the monthly OPD requests (16–17 Nov) | Demand window = count day through the delivery after next = 16 days + `delay_days` (§5). Count Tuesday morning, delivery Wednesday afternoon |
 | 11 HAD injectables must never run out (Q4) | Per-drug `critical` flag → par from the worst observed window + minimum par |
-| Main storage's form has a unit column (หน่วยนับ); IPD requests in units, and pack sizes change too often to track (16 Nov) | No box rounding and no pack sizes; output in units (whole bottles for liquids dispensed per ml) |
+| Main storage's form has a unit column (หน่วยนับ); IPD requests in units, and pack sizes change too often to track (16 Nov) | No box rounding; output in units (whole bottles for liquids dispensed per ml). Staff may type a line as whole boxes × units per box (18 Nov, §6) |
 | Low-use drugs are fetched from OPD, not requested from main storage (16 Nov), once a month (17 Nov) | Use frequency decides main storage vs OPD; OPD suggestion = a month of use (§5.2) |
 | HOSxP export is daily, one row per drug per day, no patient columns | Store daily usage in the Sheet; the daily SD and the worst W-day window need daily data |
 | Repo is public | No spreadsheet IDs, script IDs or hospital data in git |
@@ -324,7 +324,7 @@ Resolved:
 - The HOSxP report includes home medications (HM), and HM is dispensed from IPD stock, so HM stays in the usage data.
 - Liquids dispensed per ml are requested as whole bottles (KCl elixir: 240 ml per bottle) → `request_unit` / `request_factor`.
 - Ordering cycle: every 2 weeks, from main storage on IPD's own form (v0.4, §5.1).
-- Quantities in units on both lists; no pack sizes (they change too often). Main storage vs OPD by use frequency (§5.2).
+- Quantities in units on both lists. Pack sizes change too often to keep a table, so the calculation never uses them. Since 18 Nov staff may type a main-storage line as whole boxes × units per box; the last units per box is remembered per drug (`Drugs.pack_size`) and corrected by hand when main storage changes it (§6). Main storage vs OPD by use frequency (§5.2).
 - Lead time: count on Tuesday morning, main storage delivers Wednesday afternoon → `lead_days = 1` (17 Nov).
 - OPD requests: once a month → `opd_cycle_days = 30` (17 Nov).
 - OPD list: IPD's current list (79 drugs) checked against Aug–Oct usage: 33 move to main storage, 4 rarely used HAD injections for the pharmacist to decide, 28 stay with OPD, 14 unused in the period (#3, 17 Nov).
@@ -347,7 +347,7 @@ Open:
 5. **Multiple locations.** Is any drug kept in more than one place? If yes, counting needs one row per drug-location.
 6. **Drug code.** Can IT add HOSxP `icode` to the export? Names change and have typos; a code is a safer key.
 7. **Expensive, infrequent drugs.** IPD pharmacist (17 Nov): keep about 5 days of use at the maximum dose per drug. Draft table in #5, waiting for the pharmacist; enter the result as `par_override` (`min_par` is only a floor) (§5.2).
-8. ~~Pack sizes~~ not used (#2, closed).
+8. ~~Pack sizes~~ not used in the calculation (#2, closed). Optional whole-box lines typed by staff since 18 Nov (§6).
 9. ~~OPD list~~ resolved above. Deferiprone (GPO-L-ONE) moves with the 33 → `source = MAIN` until the pharmacist sets its `par_override`.
 10. ~~Rule details~~ resolved above: HAD always main storage; weekly use is the line.
 11. **หมายเลขพัสดุ.** Does main storage have an item code per drug? (#4)
