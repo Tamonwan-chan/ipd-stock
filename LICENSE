@@ -1,0 +1,96 @@
+ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+
+โปรแกรม: สต็อกยา IPD
+เริ่มพัฒนาเมื่อ: พฤศจิกายน 2569
+ผู้พัฒนา: ภญ.ธมลวรรณ จันทร์แก้ว
+ติดต่อ: tamonwanchankaew@gmail.com
+สังกัด: กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+
+ระบบนี้เป็นงานที่ผู้พัฒนาสร้างขึ้นเป็นการส่วนตัว
+ระบบนี้ รวมถึงซอร์สโค้ด การออกแบบหน้าจอ วิธีคำนวณ และเอกสารประกอบทั้งหมดในโปรเจกต์นี้
+ถือเป็นทรัพย์สินทางปัญญาของผู้พัฒนา
+
+ห้ามคัดลอก ดัดแปลง เผยแพร่ จำหน่าย หรือนำไปใช้ ไม่ว่าทั้งหมดหรือบางส่วน
+โดยไม่ได้รับอนุญาตเป็นลายลักษณ์อักษรจากผู้พัฒนา
+
+การที่ซอร์สโค้ดเปิดให้ดูได้บน GitHub หรือในเบราว์เซอร์ ไม่ถือเป็นการอนุญาตให้นำไปใช้
+
+การขออนุญาต
+ผู้ที่ต้องการใช้ ดัดแปลง หรือนำระบบนี้ไปใช้ในหน่วยงาน ต้องขออนุญาตจากผู้พัฒนาทางอีเมลข้างต้น
+และได้รับคำตอบอนุญาตเป็นลายลักษณ์อักษร (เช่น อีเมลตอบกลับจากผู้พัฒนา) ก่อนใช้งาน
+การอนุญาตไม่ใช่การโอนลิขสิทธิ์ ใช้ได้เฉพาะบุคคลหรือหน่วยงานที่ได้รับอนุญาต และโอนหรือส่งต่อให้ผู้อื่นไม่ได้
+ผู้พัฒนาอาจยกเลิกการอนุญาตได้ หากมีการฝ่าฝืนเงื่อนไขด้านล่าง
+เมื่อยกเลิกแล้ว ต้องหยุดใช้และลบสำเนาทั้งหมด
+
+ผู้ที่ได้รับอนุญาตให้ใช้หรือดัดแปลง ต้องปฏิบัติตามเงื่อนไขต่อไปนี้
+1. คงข้อความเครดิตและลิขสิทธิ์ไว้ทั้งในซอร์สโค้ด บนหน้าจอโปรแกรม และในเอกสารหรือไฟล์ที่โปรแกรมพิมพ์หรือส่งออก
+   แม้จะเปลี่ยนชื่อโปรแกรม เปลี่ยนโลโก้ หรือออกแบบหน้าจอใหม่
+2. งานที่ดัดแปลงต่อจากระบบนี้ ต้องระบุว่า "พัฒนาต้นแบบโดย ภญ.ธมลวรรณ จันทร์แก้ว"
+3. ใช้ภายในขอบเขตที่ได้รับอนุญาตเท่านั้น และห้ามส่งต่อให้บุคคลอื่นโดยไม่ได้รับอนุญาต
+4. ห้ามนำระบบนี้หรืองานที่ดัดแปลงจากระบบนี้ ไปเป็นผลงานในนามของผู้อื่น
+   ไม่ว่าจะเป็นการส่งประกวด ผลงานนวัตกรรม ผลงานวิชาการ ผลงานพัฒนาคุณภาพ (CQI)
+   หรือผลงานประกอบการประเมินเพื่อเลื่อนระดับหรือแต่งตั้งตำแหน่ง
+   หากจะนำเสนอหรือเผยแพร่ระบบนี้ในที่ใด ต้องแจ้งผู้พัฒนาก่อน และระบุชื่อผู้พัฒนาให้ชัดเจน
+5. ห้ามจำหน่าย ให้เช่า หรือนำไปหาประโยชน์ทางการค้า
+
+ข้อจำกัดความรับผิด
+ระบบนี้เป็นเครื่องมือช่วยการทำงาน ผลลัพธ์ต้องได้รับการตรวจสอบโดยผู้ประกอบวิชาชีพ
+ก่อนนำไปใช้กับผู้ป่วยทุกครั้ง ระบบให้ใช้ตามสภาพที่เป็นอยู่ และผู้พัฒนาไม่รับผิดชอบ
+ต่อความเสียหายที่เกิดจากการใช้งานหรือการดัดแปลงระบบ
+
+ไลบรารีและฟอนต์ของบุคคลอื่นที่โปรแกรมเรียกใช้ (เช่น SheetJS, ฟอนต์ IBM Plex Sans Thai และ Sarabun จาก Google Fonts และไอคอนชุด Guidance ของ Streamline)
+อยู่ภายใต้สัญญาอนุญาตของเจ้าของแต่ละราย ไม่อยู่ภายใต้ไฟล์นี้
+
+การอนุญาตนี้อยู่ภายใต้กฎหมายไทย
+
+------------------------------------------------------------
+
+Copyright © 2026 Tamonwan Chankaew (ภญ.ธมลวรรณ จันทร์แก้ว). All rights reserved.
+
+Program: สต็อกยา IPD
+First developed: November 2026
+Developer: Tamonwan Chankaew (ภญ.ธมลวรรณ จันทร์แก้ว)
+Contact: tamonwanchankaew@gmail.com
+Affiliation: Pharmacy Department, Sankamphaeng Hospital, Chiang Mai, Thailand
+
+This system is the developer's personal work.
+This system, including its source code, interface design, calculation methods and
+documentation, is the intellectual property of the developer.
+
+No part of it may be copied, modified, distributed, sold or used without prior
+written permission from the developer. Public visibility of the source code on
+GitHub or in a web browser does not grant any permission to use it.
+
+Asking for permission
+Anyone who wants to use or modify this system, or use it in an organization, must ask
+the developer by email at the address above and receive written permission (such as
+an email reply from the developer) before using it.
+Permission does not transfer copyright. It covers only the person or organization it
+was given to, and cannot be transferred or passed on. The developer may withdraw
+permission if any condition below is broken. Once it is withdrawn, all use must stop
+and all copies must be deleted.
+
+Anyone granted permission to use or modify this system must:
+1. Keep the credit and copyright notices intact, in the source code, on screen, and in
+   any document or file the program prints or exports, including after renaming,
+   rebranding or redesigning.
+2. State in any derived work: "Original prototype by Tamonwan Chankaew
+   (ภญ.ธมลวรรณ จันทร์แก้ว)".
+3. Use it only within the scope of the permission granted, and not pass it on to
+   others without permission.
+4. Not present this system, or any work derived from it, as someone else's work:
+   not in competitions, innovation or academic submissions, quality-improvement (CQI)
+   projects, or portfolios for promotion or appointment. Anyone presenting or
+   publishing this system must tell the developer first and name her clearly.
+5. Not sell, rent or otherwise use it commercially.
+
+Limitation of liability
+This system is a working aid. Its results must be checked by a qualified
+professional before they are used for any patient. It is provided as is, and the
+developer is not liable for any harm arising from its use or from changes made to it.
+
+Third-party libraries and fonts loaded by this system (such as SheetJS, the IBM Plex Sans Thai and Sarabun fonts from Google Fonts, and Streamline's Guidance icons)
+remain under their own licenses and are not covered by this file.
+
+This permission is governed by Thai law.

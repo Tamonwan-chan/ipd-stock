@@ -1,9 +1,21 @@
 <!DOCTYPE html>
+<!--
+  สต็อกยา IPD
+  ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+  Copyright © 2026 Tamonwan Chankaew. All rights reserved.
+  Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+  ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาต ดูเงื่อนไขในไฟล์ LICENSE
+  No use, copying or modification without written permission. See LICENSE.
+  Contact: tamonwanchankaew@gmail.com
+  กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+-->
 <html lang="th">
 <head>
   <base target="_top">
   <meta charset="utf-8">
   <title>สต็อกยา IPD</title>
+  <meta name="author" content="ภญ.ธมลวรรณ จันทร์แก้ว (Tamonwan Chankaew)">
+  <meta name="copyright" content="© 2026 Tamonwan Chankaew">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
   <?!= include('ui/Styles') ?>
@@ -20,6 +32,7 @@
       <button class="btn primary" id="btn-login" type="submit">เข้าสู่ระบบ</button>
       <p class="muted small">ลืมรหัสผ่าน ให้ผู้ดูแลระบบตั้งรหัสใหม่ให้</p>
     </form>
+    <footer class="pl-credit">Designed &amp; Developed by ภญ.ธมลวรรณ จันทร์แก้ว · © 2569 · <button type="button" class="pl-about-open">เกี่ยวกับโปรแกรม</button></footer>
   </div>
 
   <!-- App -->
@@ -178,6 +191,8 @@
           <div id="log-table" class="table-wrap"></div>
         </div>
       </section>
+
+      <footer class="pl-credit">Designed &amp; Developed by ภญ.ธมลวรรณ จันทร์แก้ว · © 2569 · <button type="button" class="pl-about-open">เกี่ยวกับโปรแกรม</button></footer>
     </main>
   </div>
 
@@ -192,6 +207,20 @@
       <div class="row"><button class="btn primary" id="btn-pw-save" type="submit" value="save">บันทึก</button>
         <button class="btn" id="btn-pw-cancel" type="button">ยกเลิก</button></div>
     </form>
+  </dialog>
+
+  <!-- About (credit) -->
+  <dialog class="pl-about" id="pl-about" aria-labelledby="pl-about-title">
+    <h2 id="pl-about-title">สต็อกยา IPD</h2>
+    <p class="pl-small">เวอร์ชัน 2.0</p>
+    <p>พัฒนาโดย <strong>ภญ.ธมลวรรณ จันทร์แก้ว</strong><br>
+       ติดต่อ: <a href="mailto:tamonwanchankaew@gmail.com">tamonwanchankaew@gmail.com</a><br>
+       กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่</p>
+    <p>ลิขสิทธิ์ © 2569 (2026) สงวนลิขสิทธิ์ ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาตเป็นลายลักษณ์อักษร
+       งานที่พัฒนาต่อต้องระบุว่า "พัฒนาต้นแบบโดย ภญ.ธมลวรรณ จันทร์แก้ว"</p>
+    <p class="pl-small">© 2026 Tamonwan Chankaew. All rights reserved. Use or modification requires written permission.
+       Results must be checked by a qualified professional before use with patients.</p>
+    <form method="dialog"><button class="btn" type="submit">ปิด</button></form>
   </dialog>
 
   <div id="print-area"></div>

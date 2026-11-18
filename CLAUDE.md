@@ -39,4 +39,5 @@ clasp 3: to bind a script to an existing Sheet, use `clasp create-script --paren
 - Plain JavaScript (Apps Script V8), no build step.
 - Language: code, comments and DESIGN in English; anything IPD staff read (README, UI text, printouts) in Thai.
 - `npm test` runs `node --test "test/*.test.js"` (Node ≥ 22 expands the glob). `node --test test/` fails on Node 24.
-- Git identity for commits: `Tamonwan-chan <305665671+Tamonwan-chan@users.noreply.github.com>` (keeps the owner's personal email out of public history). Set it per repo: `git config user.email ...`.
+- Git identity for commits: `Tamonwan-chan <305665671+Tamonwan-chan@users.noreply.github.com>`. Set it per repo: `git config user.email ...`.
+- Credit (owner's `program-credit` skill, 18 Nov 2026): `LICENSE`, the README license section, a header at the top of every source file, the footer + About dialog (เกี่ยวกับโปรแกรม) on every screen, and `PL_CREDIT.line` at the end of every printout and CSV export. The owner chose to show her contact email in these, in this public repo. Keep all of them; give new source files the same header.

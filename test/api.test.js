@@ -1,3 +1,13 @@
+/*
+ * สต็อกยา IPD
+ * ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+ * Copyright © 2026 Tamonwan Chankaew. All rights reserved.
+ * Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+ * ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาต ดูเงื่อนไขในไฟล์ LICENSE
+ * No use, copying or modification without written permission. See LICENSE.
+ * Contact: tamonwanchankaew@gmail.com
+ * กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+ */
 // Tests for src/Api.js (server side of the web app) against an in-memory spreadsheet.
 // Synthetic data only.
 const test = require('node:test');
@@ -372,6 +382,6 @@ test('saveDrug: edit in request units, add a new medicine, duplicates refused, l
 
 test('ui/Client.html: script parses', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/ui/Client.html'), 'utf8');
-  const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+  const js = html.replace(/^\s*<!--[\s\S]*?-->/, '').replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
   assert.doesNotThrow(() => new Function(js));
 });

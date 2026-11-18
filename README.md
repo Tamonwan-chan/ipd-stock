@@ -116,3 +116,32 @@ repo นี้เป็นสาธารณะ เก็บเฉพาะโ�
 ## เครดิต
 
 ไอคอนในหน้าเว็บจากชุด [Guidance](https://www.streamlinehq.com/icons/guidance) ของ [Streamline](https://www.streamlinehq.com) สัญญาอนุญาต [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (ปรับความหนาเส้นให้อ่านง่ายขึ้น)
+
+## ลิขสิทธิ์และการอนุญาต (License)
+
+© 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+พัฒนาโดย ภญ.ธมลวรรณ จันทร์แก้ว
+ติดต่อ: tamonwanchankaew@gmail.com
+กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+
+โปรแกรมนี้ไม่ใช่โอเพนซอร์ส การเห็นซอร์สโค้ดบน GitHub ไม่ถือเป็นการอนุญาตให้นำไปใช้
+หากต้องการใช้หรือดัดแปลง กรุณาขออนุญาตทางอีเมล tamonwanchankaew@gmail.com
+เงื่อนไขทั้งหมดอยู่ในไฟล์ [LICENSE](LICENSE)
+
+ผู้ที่ได้รับอนุญาตและนำไปใช้ นำเสนอ หรือพัฒนาต่อ ต้องระบุเครดิตว่า
+
+> พัฒนาต้นแบบโดย ภญ.ธมลวรรณ จันทร์แก้ว (Original prototype by Tamonwan Chankaew)
+
+ผลลัพธ์จากโปรแกรมต้องได้รับการตรวจสอบโดยผู้ประกอบวิชาชีพก่อนนำไปใช้กับผู้ป่วยทุกครั้ง
+
+---
+
+© 2026 Tamonwan Chankaew (ภญ.ธมลวรรณ จันทร์แก้ว). All rights reserved.
+Contact: tamonwanchankaew@gmail.com
+Pharmacy Department, Sankamphaeng Hospital, Chiang Mai, Thailand
+
+This is not open-source software. Being able to see the code on GitHub does not give
+permission to use it. To use or modify it, ask by email at tamonwanchankaew@gmail.com.
+Full terms are in [LICENSE](LICENSE). Anyone given permission must credit:
+"Original prototype by Tamonwan Chankaew (ภญ.ธมลวรรณ จันทร์แก้ว)".
+Results must be checked by a qualified professional before they are used for any patient.

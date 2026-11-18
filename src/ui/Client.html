@@ -1,3 +1,13 @@
+<!--
+  สต็อกยา IPD
+  ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+  Copyright © 2026 Tamonwan Chankaew. All rights reserved.
+  Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+  ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาต ดูเงื่อนไขในไฟล์ LICENSE
+  No use, copying or modification without written permission. See LICENSE.
+  Contact: tamonwanchankaew@gmail.com
+  กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+-->
 <script>
 (function () {
   'use strict';
@@ -156,11 +166,20 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
   function csvCell(v) { var s = String(v === null || v === undefined ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
-  function toCsv(rows) { return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
+  function toCsv(rows) { // exported files end with the credit line
+    return rows.concat([[], [PL_CREDIT.line]]).map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  }
 
   // Everything printed goes through one hidden area, so only that page is printed.
+  // Credit line for everything printed or exported (program-credit). Keep it.
+  var PL_CREDIT = Object.freeze({
+    program: 'สต็อกยา IPD',
+    version: '2.0',
+    developer: 'ภญ.ธมลวรรณ จันทร์แก้ว (Tamonwan Chankaew)',
+    line: 'สต็อกยา IPD · Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว · © 2569 (2026) สงวนลิขสิทธิ์'
+  });
   function printHtml(html) {
-    $('print-area').innerHTML = html;
+    $('print-area').innerHTML = html + '<p class="pl-print-credit">' + esc(PL_CREDIT.line) + '</p>';
     window.print();
   }
 
@@ -1781,6 +1800,9 @@
   S.reqMode = load('reqMode', 'main') === 'opd' ? 'opd' : 'main';
   S.token = load('token', null);
   addIcons(document);
+  each('.pl-about-open', null, function (b) {
+    b.onclick = function () { var d = $('pl-about'); if (d.showModal) d.showModal(); else d.setAttribute('open', ''); };
+  });
   wire();
   if (S.token) reload(); else showLogin('');
 })();
