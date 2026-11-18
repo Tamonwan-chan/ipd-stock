@@ -26,7 +26,9 @@ var Api = (function () {
   function lineFromRow_(l) {
     return {
       on_hand: l.on_hand, par_used: l.par_used, suggested_qty: l.suggested_qty,
-      final_qty: l.final_qty, change_reason: l.change_reason || '', flags: l.flags || ''
+      final_qty: l.final_qty, boxes: l.boxes === undefined ? '' : l.boxes,
+      pack_size: l.pack_size === undefined ? '' : l.pack_size,
+      change_reason: l.change_reason || '', flags: l.flags || ''
     };
   }
 
@@ -75,6 +77,7 @@ var Api = (function () {
         unit: String(d.request_unit || '').trim() || d.unit,
         hosxp_unit: d.unit,
         factor: factor,
+        pack_size: C.toNumber(d.pack_size),
         item_code: d.item_code || '',
         location: d.location || '',
         shelf_order: C.toNumber(d.shelf_order),
@@ -141,26 +144,34 @@ var Api = (function () {
 
   /**
    * Save counted / edited lines. The server recomputes par_used, suggested_qty and flags.
+   * When `boxes` and `pack_size` (units per box) are both given, final_qty = boxes × pack_size.
+   * A typed pack_size is remembered on the drug (Drugs.pack_size) and offered again next round.
    * @param {string} roundId
-   * @param {{drug_id:string, on_hand:*, final_qty:*, change_reason:string}[]} edits
+   * @param {{drug_id:string, on_hand:*, final_qty:*, boxes:*, pack_size:*, change_reason:string}[]} edits
    * @return {Object<string, Object>} saved lines by drug_id
    */
   function saveLines(roundId, edits, ss) {
     var C = calc_(), D = db_();
     var round = roundById_(roundId, ss);
     if (round.status === 'APPROVED') throw new Error('รอบนี้อนุมัติแล้ว แก้ไขไม่ได้');
+    D.ensureColumns('RoundLines', ss); // Sheets set up before boxes / pack_size existed
+    D.ensureColumns('Drugs', ss);
     var s = D.settings(ss);
     var drugs = {};
     D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
 
-    var out = {}, rows = [];
+    var out = {}, rows = [], packs = {};
     edits.forEach(function (e) {
       var d = drugs[e.drug_id];
       if (!d) throw new Error('ไม่พบยา ' + e.drug_id);
       var p = C.parFromStored(d);
       var factor = C.toNumber(d.request_factor) || 1;
       var order = C.suggestOrder(p.par, e.on_hand, factor);
-      var finalQty = C.toNumber(e.final_qty);
+      var pack = C.toNumber(e.pack_size);
+      if (pack !== null && pack <= 0) pack = null;
+      var byBox = C.boxQty(e.boxes, pack);
+      var finalQty = byBox !== null ? byBox : C.toNumber(e.final_qty);
+      if (pack !== null && pack !== C.toNumber(d.pack_size)) { d.pack_size = pack; packs[e.drug_id] = d; }
       var flags = C.lineFlags({ critical: !!d.critical },
         { par: p.par, source: p.source, mean: C.toNumber(d.mean_daily) || 0, min: C.minFromStored(d).min },
         order, finalQty === null ? '' : finalQty, factor, s);
@@ -170,6 +181,8 @@ var Api = (function () {
         par_used: p.par,
         suggested_qty: order.qty === null ? '' : order.qty,
         final_qty: finalQty === null ? '' : finalQty,
+        boxes: byBox === null ? '' : C.toNumber(e.boxes),
+        pack_size: pack === null ? '' : pack,
         change_reason: e.change_reason || '',
         flags: flags.join(' ')
       };
@@ -177,6 +190,8 @@ var Api = (function () {
       out[e.drug_id] = lineFromRow_(line);
     });
     D.upsert('RoundLines', rows, ss);
+    var changed = Object.keys(packs).map(function (id) { return packs[id]; });
+    if (changed.length) D.updateFields('Drugs', changed, ['pack_size'], ss);
     if (!round.counted_by) D.updateFields('Rounds', [{ _row: round._row, counted_by: userEmail_() }], ['counted_by'], ss);
     return out;
   }

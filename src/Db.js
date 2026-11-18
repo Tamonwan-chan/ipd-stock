@@ -104,6 +104,31 @@ var Db = (function () {
 
   // ------------------------------------------------------------------ setup
 
+  /** Append the schema columns missing from row 1; returns their names. */
+  function addMissingColumns_(sh, name, header) {
+    var missing = schema_().columnNames(name).filter(function (c) { return header.indexOf(c) < 0; });
+    if (missing.length) sh.getRange(1, header.length + 1, 1, missing.length).setValues([missing]);
+    return missing;
+  }
+
+  /**
+   * Add one existing tab's missing schema columns (formatted by type), so a Sheet set up
+   * before a column existed keeps working without rerunning setup. Cheap when nothing is missing.
+   * @return {string[]} columns added
+   */
+  function ensureColumns(name, ss) {
+    var S = schema_();
+    var sh = sheet_(name, ss);
+    var header = header_(sh);
+    var missing = addMissingColumns_(sh, name, header);
+    var rows = Math.max(sh.getMaxRows() - 1, 1);
+    missing.forEach(function (h, i) {
+      var fmt = FORMATS[S.typeOf(name, h)];
+      if (fmt) sh.getRange(2, header.length + i + 1, rows, 1).setNumberFormat(fmt);
+    });
+    return missing;
+  }
+
   /**
    * Create missing tabs, add missing columns at the end of row 1 (never reorders or
    * deletes), format columns by type, freeze the header, add missing Settings keys
@@ -123,12 +148,9 @@ var Db = (function () {
       if (!sh) { sh = book.insertSheet(name); report.created.push(name); }
 
       var header = header_(sh);
-      var missing = S.columnNames(name).filter(function (c) { return header.indexOf(c) < 0; });
-      if (missing.length) {
-        sh.getRange(1, header.length + 1, 1, missing.length).setValues([missing]);
-        if (header.length) report.addedColumns[name] = missing;
-        header = header.concat(missing);
-      }
+      var missing = addMissingColumns_(sh, name, header);
+      if (missing.length && header.length) report.addedColumns[name] = missing;
+      header = header.concat(missing);
       sh.setFrozenRows(1);
 
       var rows = Math.max(sh.getMaxRows() - 1, 1);
@@ -331,6 +353,7 @@ var Db = (function () {
     fromCell: fromCell,
     toCell: toCell,
     ensureSchema: ensureSchema,
+    ensureColumns: ensureColumns,
     readTable: readTable,
     readSettings: readSettings,
     settings: settings,

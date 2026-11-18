@@ -6,6 +6,7 @@ Changes from v0.1: no pack boxes (OPD accepts plain units); IPD lines are added 
 Changes from v0.2: par uses the standard periodic-review safety-stock formula (it beat the percentile method at equal stock); liquids dispensed per ml are counted and requested in whole bottles; expensive, infrequent drugs get their own tier; home medications (HM) confirmed to come from IPD stock, so they stay in the usage data.
 Changes from v0.3 (issues #1–#4): IPD requests from **main storage (คลัง) every 2 weeks** on its own form ใบเบิกหรือใบส่งคืน, no longer through OPD's weekly requisition; drugs used **less than weekly** are fetched from OPD instead, as a separate, optional request; quantities stay in units. A shelf min (ยอดต่ำสุด) warns when stock won't last until the delivery.
 Dropped on 16 Nov: the 1-pack rule (main storage when the busiest cycle used ≥ 80% of a pack). Main storage's pack sizes change often and IPD requests in units, so pack sizes are not tracked.
+Added on 18 Nov (staff request): optional whole-box lines on the main-storage form. Staff type boxes and units per box on a count line; the form then shows `1x1000` under จำนวนเบิกใหม่ and `1` under จ่ายหรือรับคืน. The last units per box typed is remembered per drug (`Drugs.pack_size`) and offered next round, so a changed box size is visible and corrected by hand. Pack sizes still play no part in par, min or the suggested quantity.
 
 ## 1. What round 1 must do
 
@@ -97,6 +98,7 @@ Demand window `W = cycle_days + lead_days + 1 + delay_days` (= 16 by default: co
 | `request_unit` | ขวด | optional, unit to count and request in when it differs from `unit`; blank = `unit` |
 | `request_factor` | 240 | `unit`s per `request_unit` (KCl syrup: 240 ml per bottle); blank = 1 |
 | `request_name` | Vitamin B complex | optional, name to print on the requisition; blank = `hosxp_name` |
+| `pack_size` | 1000 | units (`request_unit`) per box at main storage, as last typed on a count line; written by the web app, offered again next round. Display only (§6) |
 | `source` | MAIN | pharmacist's choice: `MAIN` (main storage, counted, par-based) / `OPD` (fetched from OPD, optional) / `NONE` (requested from neither: billing-only rows such as `Salbutamol solution (คิดเป็น มล.)`) / blank = follow `source_calc` |
 | `item_code` | | main storage's item code (หมายเลขพัสดุ) if one exists (§9) |
 | `unit_price` | 0.5 | latest HOSxP `unit_price`; used only to find expensive drugs |
@@ -120,7 +122,8 @@ Match key on import: `hosxp_name + strength + unit`.
 **Rounds**: `round_id` (the count date, e.g. `2026-11-17`; ISO week numbers no longer fit a 2-week cycle), `count_date`, `status`, `counted_by`, `submitted_at`, `reviewed_by`, `approved_at`, `note`
 
 **RoundLines**: one row per round and drug (key `round_id` + `drug_id`, written with `Db.upsert` as each count autosaves); frozen at approval
-`round_id`, `drug_id`, `on_hand`, `par_used`, `suggested_qty`, `final_qty`, `change_reason`, `flags`
+`round_id`, `drug_id`, `on_hand`, `par_used`, `suggested_qty`, `final_qty`, `boxes`, `pack_size`, `change_reason`, `flags`
+(`boxes` and `pack_size`: optional whole boxes requested and units per box; when both are set, `final_qty = boxes × pack_size`. `Api.saveLines` adds these columns to an older Sheet on first save.)
 
 **Users**: `email`, `name`, `role` (`counter` / `pharmacist` / `admin`)
 
@@ -142,6 +145,7 @@ par            = par_override  if set,  else max(par_calc, min_par)
 on_hand        = counted_request_units × request_factor            (decimals allowed: half a bottle = 0.5)
 suggested_qty  = ceil( max(0, par − on_hand) / request_factor )    in request units
 main form line = ลำดับ | item_code | request_name | request_unit | on_hand | final_qty
+                 by box: จำนวนเบิกใหม่ = "boxes x pack_size", จ่ายหรือรับคืน = boxes
 OPD suggestion = ceil( d̄·opd_cycle_days / request_factor ), at least 1 if used  (staff choose whether to request)
 
 T              = lead_days + 1 + delay_days                        (default 2 days: count → this round's delivery)
@@ -275,8 +279,8 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 One page (`ui/App.html`) with five tabs:
 
 1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
-2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
-3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
+2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. Optional `กล่อง` × `ต่อกล่อง` (boxes × units per box, the two inputs after `เบิกจริง`) fills `เบิกจริง`; units per box is prefilled with the last value typed for the drug, and a `เบิกจริง` typed by hand that no longer matches clears the boxes. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
+3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Lines requested by box show `boxes x pack_size` under จำนวนเบิกใหม่ and the box count under จ่ายหรือรับคืน. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
 4. **ขอจาก OPD**: OPD-source drugs used in the history window, suggested quantity = average use over `opd_cycle_days` (a month); tick lines, print or copy. Ticks are remembered in the browser only.
 5. **ป้ายสูงสุด/ต่ำสุด**: printable A4 list of every stocked drug by location with max and min in request units (rounded up), plus CSV. Reprint after each import, since both numbers change.
 

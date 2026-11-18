@@ -35,6 +35,7 @@ var Schema = (function () {
         ['request_unit', 'string'],
         ['request_factor', 'number'],
         ['request_name', 'string'],
+        ['pack_size', 'number'],
         ['source', 'string'],
         ['item_code', 'string'],
         ['unit_price', 'number'],
@@ -79,6 +80,8 @@ var Schema = (function () {
         ['par_used', 'number'],
         ['suggested_qty', 'number'],
         ['final_qty', 'number'],
+        ['boxes', 'number'],
+        ['pack_size', 'number'],
         ['change_reason', 'string'],
         ['flags', 'string']
       ])

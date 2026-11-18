@@ -130,6 +130,49 @@ test('round: start, save lines (server recomputes), reopen same round, approve l
   assert.equal(Api.state(r.round_id, ss).round.round_id, r.round_id); // pick an older round
 });
 
+// Simulate a Sheet set up before a column existed: remove it from the tab.
+function dropColumn(ss, tab, name) {
+  const sh = ss.getSheetByName(tab);
+  const i = sh.grid[0].indexOf(name);
+  assert.ok(i >= 0, name);
+  sh.grid.forEach(row => row.splice(i, 1));
+  const f = {};
+  for (const [c, v] of Object.entries(sh.formats)) if (+c !== i + 1) f[+c > i + 1 ? +c - 1 : c] = v;
+  sh.formats = f;
+}
+
+test('saveLines: boxes × units per box sets final_qty; units per box remembered on the drug', () => {
+  const ss = setup();
+  dropColumn(ss, 'Drugs', 'pack_size'); // Sheet from before 18 Nov: columns added on first save
+  dropColumn(ss, 'RoundLines', 'boxes');
+  dropColumn(ss, 'RoundLines', 'pack_size');
+  const r = Api.startRound(ss);
+  const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
+  assert.equal(busy.pack_size, null);
+
+  let saved = Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: 7, boxes: 1, pack_size: 1000 }], ss);
+  assert.deepEqual([saved[busy.drug_id].final_qty, saved[busy.drug_id].boxes, saved[busy.drug_id].pack_size], [1000, 1, 1000]);
+  assert.match(saved[busy.drug_id].flags, /EDITED/);
+  let st = Api.state(null, ss);
+  assert.equal(st.drugs.find(x => x.drug_id === busy.drug_id).pack_size, 1000);
+  assert.deepEqual([st.lines[busy.drug_id].boxes, st.lines[busy.drug_id].pack_size], [1, 1000]);
+
+  // no boxes: final_qty as typed; the units per box is still recorded
+  saved = Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: 300, boxes: '', pack_size: 1000 }], ss);
+  assert.deepEqual([saved[busy.drug_id].final_qty, saved[busy.drug_id].boxes], [300, '']);
+
+  // main storage changed the box: 500 per box replaces 1000 for next time
+  saved = Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: '', boxes: 2, pack_size: 500 }], ss);
+  assert.equal(saved[busy.drug_id].final_qty, 1000);
+  st = Api.state(null, ss);
+  assert.equal(st.drugs.find(x => x.drug_id === busy.drug_id).pack_size, 500);
+  assert.equal(Db.readTable('RoundLines', ss).length, 1);
+
+  // clearing the units per box on a line keeps the drug's remembered value
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: 5, boxes: '', pack_size: '' }], ss);
+  assert.equal(Api.state(null, ss).drugs.find(x => x.drug_id === busy.drug_id).pack_size, 500);
+});
+
 test('saveLines: blank count is "not counted", unknown drug fails', () => {
   const ss = setup();
   const r = Api.startRound(ss);

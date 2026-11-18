@@ -98,12 +98,20 @@
     var f = factor || 1;
     return Math.ceil(Math.max(0, par - c * f) / f - 1e-9) + 0;
   }
+  // Same rule as Calc.boxQty: boxes × units per box, or null.
+  function boxQty(boxes, pack) {
+    var b = num(boxes), k = num(pack);
+    return b === null || b < 0 || k === null || k <= 0 ? null : Math.round(b * k * 1e6) / 1e6;
+  }
   function lineOf(d) {
     var saved = (S.state.lines && S.state.lines[d.drug_id]) || {};
     var p = S.pending[d.drug_id];
     var onHand = p ? p.on_hand : saved.on_hand;
     var finalQty = p ? p.final_qty : saved.final_qty;
     var reason = p ? p.change_reason : saved.change_reason;
+    var boxes = num(p ? p.boxes : saved.boxes);
+    var pack = num(p ? p.pack_size : saved.pack_size);
+    if (pack === null) pack = d.pack_size; // last units per box typed for this drug
     var sug = suggest(d.par, onHand, d.factor);
     var fq = num(finalQty);
     return {
@@ -112,6 +120,8 @@
       final_qty: fq,
       qty: fq !== null ? fq : sug,
       reason: reason || '',
+      boxes: boxes,
+      pack: pack === undefined ? null : pack,
       flags: p ? null : (saved.flags || ''),
       counted: num(onHand) !== null
     };
@@ -395,7 +405,7 @@
     var q = S.filter.trim().toLowerCase();
     var html = '', lastLoc = null, shown = 0;
     html += '<div class="drow head"><span>ยา</span><span class="num">สูงสุด / ต่ำสุด</span><span class="num">คงเหลือ (นับ)</span>' +
-      '<span class="num">ควรเบิก</span><span class="num">เบิกจริง</span></div>';
+      '<span class="num">ควรเบิก</span><span class="num">เบิกจริง</span><span class="num">กล่อง</span><span class="num">ต่อกล่อง</span></div>';
     stockedDrugs().forEach(function (d) {
       var l = lineOf(d);
       if (q && (d.name + ' ' + d.hosxp_name + ' ' + d.strength).toLowerCase().indexOf(q) < 0) return;
@@ -429,6 +439,11 @@
       '<div><span class="lbl">เบิกจริง</span><input type="number" inputmode="numeric" step="1" min="0" data-f="final_qty" data-id="' +
       esc(d.drug_id) + '" value="' + (l.final_qty === null ? '' : esc(l.final_qty)) + '" placeholder="' +
       (l.suggested === null ? '' : esc(l.suggested)) + '"' + dis + '></div>' +
+      '<div><span class="lbl">กล่อง</span><input type="number" inputmode="numeric" step="1" min="0" data-f="boxes" data-id="' +
+      esc(d.drug_id) + '" value="' + (l.boxes === null ? '' : esc(l.boxes)) + '" title="จำนวนกล่อง: เบิกจริง = กล่อง × จำนวนต่อกล่อง"' + dis + '></div>' +
+      '<div><span class="lbl">ต่อกล่อง</span><input type="number" inputmode="decimal" step="any" min="0" data-f="pack_size" data-id="' +
+      esc(d.drug_id) + '" value="' + (l.pack === null ? '' : esc(l.pack)) + '" title="จำนวน' + esc(d.unit) +
+      'ต่อกล่อง (โปรแกรมจำค่าล่าสุดไว้ ถ้าคลังเปลี่ยนขนาดกล่อง ให้แก้ตรงนี้)"' + dis + '></div>' +
       '<div class="reason"' + (edited ? '' : ' hidden') + '><input type="text" data-f="change_reason" data-id="' + esc(d.drug_id) +
       '" placeholder="เหตุผลที่แก้จำนวน" value="' + esc(l.reason) + '"' + dis + '></div>' +
       '<div class="flags">' + flags + '</div>' +
@@ -474,9 +489,19 @@
     var id = this.getAttribute('data-id'), field = this.getAttribute('data-f');
     var d = S.state.drugs.filter(function (x) { return x.drug_id === id; })[0];
     var cur = lineOf(d);
-    var p = S.pending[id] || { drug_id: id, on_hand: cur.on_hand, final_qty: cur.final_qty === null ? '' : cur.final_qty, change_reason: cur.reason };
+    var p = S.pending[id] || { drug_id: id, on_hand: cur.on_hand, final_qty: cur.final_qty === null ? '' : cur.final_qty,
+      boxes: cur.boxes === null ? '' : cur.boxes, pack_size: cur.pack === null ? '' : cur.pack, change_reason: cur.reason };
     p[field] = this.value;
     S.pending[id] = p;
+    // Boxes × units per box sets เบิกจริง; a เบิกจริง that no longer matches clears the boxes.
+    var row = $('row-' + id), q = boxQty(p.boxes, p.pack_size);
+    if ((field === 'boxes' || field === 'pack_size') && q !== null) {
+      p.final_qty = String(q);
+      row.querySelector('input[data-f="final_qty"]').value = q;
+    } else if (field === 'final_qty' && q !== null && q !== num(p.final_qty)) {
+      p.boxes = '';
+      row.querySelector('input[data-f="boxes"]').value = '';
+    }
     refreshRow(d);
     scheduleSave();
   }
@@ -518,6 +543,8 @@
     return run('apiSaveLines', S.state.round.round_id, batch).then(function (saved) {
       Object.keys(saved).forEach(function (id) {
         S.state.lines[id] = saved[id];
+        var pk = num(saved[id].pack_size);
+        if (pk !== null) S.state.drugs.forEach(function (x) { if (x.drug_id === id) x.pack_size = pk; });
         // keep edits typed while saving
         if (S.pending[id] && JSON.stringify(S.pending[id]) === sent[id]) delete S.pending[id];
       });
@@ -573,8 +600,11 @@
   // ------------------------------------------------------------------ form
   function formLines() {
     return orderLines().map(function (x, i) {
+      var l = x.l, byBox = l.boxes !== null && boxQty(l.boxes, l.pack) === l.qty;
       return { no: i + 1, code: x.d.item_code, name: x.d.name + (x.d.strength && x.d.name.indexOf(x.d.strength) < 0 ? ' ' + x.d.strength : ''),
-        unit: x.d.unit, onHand: x.l.on_hand, qty: x.l.qty };
+        unit: x.d.unit, onHand: l.on_hand, qty: l.qty,
+        // whole boxes: จำนวนเบิกใหม่ "1x1000", จ่ายหรือรับคืน 1 (number of boxes)
+        boxes: byBox ? l.boxes : null, pack: byBox ? l.pack : null };
     });
   }
 
@@ -594,7 +624,9 @@
       for (var i = 0; i < LINES_PER_PAGE; i++) {
         var l = slice[i];
         body += l ? '<tr><td class="c">' + l.no + '</td><td>' + esc(l.code) + '</td><td>' + esc(l.name) + '</td><td class="c">' + esc(l.unit) +
-          '</td><td class="n">' + esc(fmt(num(l.onHand))) + '</td><td class="n">' + esc(fmt(l.qty, 0)) + '</td><td></td><td></td><td></td><td></td></tr>'
+          '</td><td class="n">' + esc(fmt(num(l.onHand))) + '</td><td class="n">' +
+          esc(l.boxes === null ? fmt(l.qty, 0) : fmt(l.boxes, 0) + 'x' + fmt(l.pack)) + '</td><td class="n">' +
+          (l.boxes === null ? '' : esc(fmt(l.boxes, 0))) + '</td><td></td><td></td><td></td></tr>'
           : '<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>';
       }
       html += '<div class="form-page">' +
@@ -621,8 +653,10 @@
   }
 
   function formRows() {
-    return [['ลำดับ', 'หมายเลขพัสดุ', 'รายการ', 'หน่วยนับ', 'คงเหลือจากครั้งที่แล้ว', 'จำนวนเบิกใหม่', 'หมายเหตุ']]
-      .concat(formLines().map(function (l) { return [l.no, l.code, l.name, l.unit, l.onHand, l.qty, '']; }));
+    return [['ลำดับ', 'หมายเลขพัสดุ', 'รายการ', 'หน่วยนับ', 'คงเหลือจากครั้งที่แล้ว', 'จำนวนเบิกใหม่', 'จ่ายหรือรับคืน', 'หมายเหตุ']]
+      .concat(formLines().map(function (l) {
+        return [l.no, l.code, l.name, l.unit, l.onHand, l.boxes === null ? l.qty : l.boxes + 'x' + l.pack, l.boxes === null ? '' : l.boxes, ''];
+      }));
   }
 
   // ------------------------------------------------------------------- OPD
