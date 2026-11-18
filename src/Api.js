@@ -11,6 +11,7 @@ var Api = (function () {
   function calc_() { return typeof Calc !== 'undefined' ? Calc : require('./Calc.js'); }
   function db_() { return typeof Db !== 'undefined' ? Db : require('./Db.js'); }
   function import_() { return typeof Import !== 'undefined' ? Import : require('./Import.js'); }
+  function schema_() { return typeof Schema !== 'undefined' ? Schema : require('./Schema.js'); }
 
   function userEmail_() {
     try { return typeof Session !== 'undefined' ? Session.getActiveUser().getEmail() : ''; } catch (e) { return ''; }
@@ -101,6 +102,7 @@ var Api = (function () {
         window_days: C.windowDays(s), min_days: C.minDays(s), min_use_freq: s.min_use_freq,
         opd_cycle_days: s.opd_cycle_days },
       usage: { from: D.fromCell(raw.usage_from, 'date'), to: D.fromCell(raw.usage_to, 'date') },
+      locations: schema_().ENUMS.location.slice(),
       drugs: out,
       round: round ? roundInfo_(round) : null,
       lines: lines,
@@ -196,6 +198,33 @@ var Api = (function () {
     return out;
   }
 
+  /**
+   * Set where stocked drugs are kept and their counting order (Drugs.location / shelf_order),
+   * from the page's arranging view. Not tied to a round.
+   * @param {{drug_id:string, location:string, shelf_order:*}[]} changes  location '' = not set
+   * @return {number} rows written
+   */
+  function saveLocations(changes, ss) {
+    var C = calc_(), D = db_();
+    var allowed = schema_().ENUMS.location;
+    var byId = {};
+    D.readTable('Drugs', ss).forEach(function (d) { byId[d.drug_id] = d; });
+    var recs = {};
+    changes.forEach(function (c) {
+      var d = byId[c.drug_id];
+      if (!d) throw new Error('ไม่พบยา ' + c.drug_id);
+      var loc = String(c.location || '').trim();
+      if (loc && allowed.indexOf(loc) < 0) throw new Error('ไม่รู้จักที่เก็บ ' + loc);
+      var order = C.toNumber(c.shelf_order);
+      d.location = loc;
+      d.shelf_order = loc && order !== null ? order : '';
+      recs[c.drug_id] = d;
+    });
+    var list = Object.keys(recs).map(function (id) { return recs[id]; });
+    D.updateFields('Drugs', list, ['location', 'shelf_order'], ss);
+    return list.length;
+  }
+
   /** Approve (freeze) a round. */
   function approveRound(roundId, ss) {
     var D = db_();
@@ -207,7 +236,8 @@ var Api = (function () {
     return roundInfo_(round);
   }
 
-  return { state: state, importFile: importFile, startRound: startRound, saveLines: saveLines, approveRound: approveRound };
+  return { state: state, importFile: importFile, startRound: startRound, saveLines: saveLines,
+    saveLocations: saveLocations, approveRound: approveRound };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Api;
@@ -226,4 +256,5 @@ function apiState(roundId) {
 function apiImportFile(rows) { return Db.withLock(function () { return Api.importFile(rows); }); }
 function apiStartRound() { return Db.withLock(function () { return Api.startRound(); }); }
 function apiSaveLines(roundId, edits) { return Db.withLock(function () { return Api.saveLines(roundId, edits); }); }
+function apiSaveLocations(changes) { return Db.withLock(function () { return Api.saveLocations(changes); }); }
 function apiApproveRound(roundId) { return Db.withLock(function () { return Api.approveRound(roundId); }); }

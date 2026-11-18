@@ -16,6 +16,11 @@
     opdSel: {},           // drug_id -> true
     opdQty: {},           // drug_id -> qty typed
     opdFilter: '',
+    arrange: false,       // tab 2 shows the arranging view (where each drug is kept)
+    arrLoc: '',           // place being arranged
+    arrFilter: '',
+    locSaving: 0,         // location saves in flight
+    locQueue: Promise.resolve(),
     head: { book: '', no: '', from: 'ห้องยาผู้ป่วยใน (IPD)', to: 'คลังยา', date: '' }
   };
   var LINES_PER_PAGE = 19;
@@ -126,9 +131,17 @@
       counted: num(onHand) !== null
     };
   }
+  // Places in the order of state.locations; places typed by hand after them; not set last.
+  function locRank(loc) {
+    if (!loc) return 1e9;
+    var i = S.state.locations.indexOf(loc);
+    return i < 0 ? 1e6 : i;
+  }
   function stockedDrugs() {
     return S.state.drugs.filter(function (d) { return d.stocked; }).sort(function (a, b) {
-      var la = a.location || '￿', lb = b.location || '￿';
+      var ra = locRank(a.location), rb = locRank(b.location);
+      if (ra !== rb) return ra - rb;
+      var la = a.location || '', lb = b.location || '';
       if (la !== lb) return la < lb ? -1 : 1;
       var sa = a.shelf_order === null ? 1e9 : a.shelf_order, sb = b.shelf_order === null ? 1e9 : b.shelf_order;
       if (sa !== sb) return sa - sb;
@@ -352,11 +365,14 @@
       box.innerHTML = '<div class="card"><p>ยังไม่มีข้อมูลการใช้ยา นำเข้าไฟล์จาก HOSxP ที่แท็บ 1 ก่อน</p></div>';
       return;
     }
+    if (S.arrange) { renderArrange(); return; }
     if (!st.round) {
       box.innerHTML = '<div class="card"><h2>ยังไม่มีรอบนับที่เปิดอยู่</h2>' +
         '<p class="muted">เริ่มรอบใหม่เมื่อจะนับยาเพื่อเบิกจากคลัง (ทุก ' + st.settings.cycle_days + ' วัน)</p>' +
-        '<button class="btn primary" id="btn-start">เริ่มนับรอบใหม่ วันที่ ' + thDate(st.today) + '</button></div>';
+        '<div class="row"><button class="btn primary" id="btn-start">เริ่มนับรอบใหม่ วันที่ ' + thDate(st.today) + '</button>' +
+        '<button class="btn" id="btn-arrange">จัดที่เก็บยา</button></div></div>';
       $('btn-start').onclick = startRound;
+      $('btn-arrange').onclick = openArrange;
       return;
     }
     var locked = st.round.status === 'APPROVED';
@@ -388,6 +404,7 @@
       '<input type="search" id="count-search" placeholder="ค้นหายา" value="' + esc(S.filter) + '">' +
       '<label class="check small"><input type="checkbox" id="only-order"' + (S.onlyOrder ? ' checked' : '') + '> เฉพาะที่ต้องเบิก</label>' +
       '<span class="spacer"></span>' +
+      '<button class="btn" id="btn-arrange">จัดที่เก็บยา</button>' +
       (locked ? '' : '<button class="btn" id="btn-approve">อนุมัติรอบนี้</button>') +
       '</div>' +
       '<div id="drug-list"></div>';
@@ -395,6 +412,7 @@
     $('round-pick').onchange = function () { flushSave().then(function () { return reload($('round-pick').value); }); };
     $('count-search').oninput = function () { S.filter = this.value; renderDrugList(); };
     $('only-order').onchange = function () { S.onlyOrder = this.checked; renderDrugList(); };
+    $('btn-arrange').onclick = openArrange;
     if (!locked) setupApprove();
     renderDrugList();
     renderSaveState();
@@ -595,6 +613,138 @@
         .then(function () { toast('อนุมัติแล้ว'); return reload(S.state.round.round_id); })
         .catch(function (e) { toast('อนุมัติไม่สำเร็จ: ' + errMsg(e), true); btn.disabled = false; });
     };
+  }
+
+  // --------------------------------------------------------------- arrange
+  // Staff set where each stocked drug is kept and the counting order, walking the shelves:
+  // pick a place, then tap ＋ on each drug in the order seen; it goes to the end of that place.
+  function openArrange() {
+    flushSave();
+    S.arrange = true;
+    renderCount();
+    window.scrollTo(0, 0);
+  }
+
+  function groupOf(loc) {
+    return stockedDrugs().filter(function (d) { return (d.location || '') === loc; });
+  }
+  function lastOrder(loc) {
+    return groupOf(loc).reduce(function (m, d) { return d.shelf_order !== null && d.shelf_order > m ? d.shelf_order : m; }, 0);
+  }
+
+  function renderArrange() {
+    var locs = S.state.locations;
+    if (locs.indexOf(S.arrLoc) < 0) S.arrLoc = locs[0];
+    $('count-body').innerHTML =
+      '<div class="card">' +
+      '<div class="row"><h2>จัดที่เก็บและลำดับยา</h2><span class="spacer"></span>' +
+      '<span id="arr-save" class="save-state muted small"></span>' +
+      '<button class="btn primary" id="btn-arrange-done">กลับไปนับยา</button></div>' +
+      '<p class="muted small">เลือกที่เก็บที่ยืนอยู่ แล้วเดินตามชั้น ค้นหายาที่เห็นทีละตัว กด ＋ ยาจะต่อท้ายที่เก็บนั้นตามลำดับที่กด ' +
+      'ขยับลำดับด้วย ↑ ↓ หรือย้ายที่เก็บจากช่องเลือกท้ายแถว ลำดับนี้ใช้ตอนนับยาและพิมพ์ป้ายสูงสุด/ต่ำสุด บันทึกทันทีทุกครั้งที่กด</p>' +
+      '<div class="row"><label class="small">ที่เก็บที่กำลังจัด <select id="arr-loc">' +
+      locs.map(function (l) { return '<option' + (l === S.arrLoc ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('') +
+      '</select></label>' +
+      '<input type="search" id="arr-search" placeholder="ค้นหายาที่ยังไม่ระบุที่เก็บ" value="' + esc(S.arrFilter) + '"></div>' +
+      '</div>' +
+      '<div id="arr-lists"></div>';
+    $('btn-arrange-done').onclick = function () { S.arrange = false; renderCount(); };
+    $('arr-loc').onchange = function () { S.arrLoc = this.value; store('arrLoc', S.arrLoc); renderArrangeLists(); };
+    $('arr-search').oninput = function () { S.arrFilter = this.value; renderArrangeLists(); };
+    renderArrangeLists();
+    renderLocSave();
+  }
+
+  function renderArrangeLists() {
+    var locs = S.state.locations, q = S.arrFilter.trim().toLowerCase();
+    var drugs = stockedDrugs();
+    var unplaced = drugs.filter(function (d) { return !d.location; });
+    var shown = unplaced.filter(function (d) { return !q || (d.name + ' ' + d.hosxp_name + ' ' + d.strength).toLowerCase().indexOf(q) >= 0; });
+    var html = '<div class="loc-head">ยังไม่ระบุที่เก็บ (' + unplaced.length + ')</div>';
+    html += shown.map(function (d) {
+      return '<div class="arow"><span></span>' + arrName(d) +
+        '<div class="ctl"><button class="btn" data-add="' + esc(d.drug_id) + '">＋ ' + esc(S.arrLoc) + '</button></div></div>';
+    }).join('') || '<p class="muted small">' + (unplaced.length ? 'ไม่พบยาที่ค้นหา' : 'ระบุที่เก็บครบทุกรายการแล้ว') + '</p>';
+    // places in order, then any place typed by hand in the Sheet
+    var places = locs.slice();
+    drugs.forEach(function (d) { if (d.location && places.indexOf(d.location) < 0) places.push(d.location); });
+    places.forEach(function (loc) {
+      var g = groupOf(loc);
+      html += '<div class="loc-head">' + esc(loc) + ' (' + g.length + ')' + (loc === S.arrLoc ? ' ← กำลังจัด' : '') + '</div>';
+      if (!g.length) html += '<p class="muted small">ยังไม่มียา</p>';
+      g.forEach(function (d, i) {
+        html += '<div class="arow"><span class="muted">' + (i + 1) + '</span>' + arrName(d) + '<div class="ctl">' +
+          '<button class="btn" data-up="' + esc(d.drug_id) + '"' + (i === 0 ? ' disabled' : '') + ' aria-label="ขึ้น">↑</button>' +
+          '<button class="btn" data-down="' + esc(d.drug_id) + '"' + (i === g.length - 1 ? ' disabled' : '') + ' aria-label="ลง">↓</button>' +
+          '<select data-move="' + esc(d.drug_id) + '" aria-label="ย้ายที่เก็บ">' +
+          places.map(function (l) { return '<option' + (l === loc ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('') +
+          '<option value="">ไม่ระบุ</option></select></div></div>';
+      });
+    });
+    var box = $('arr-lists');
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-add]'), function (b) {
+      b.onclick = function () { placeAtEnd(this.getAttribute('data-add'), S.arrLoc, true); };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-up],[data-down]'), function (b) {
+      b.onclick = function () {
+        var up = this.hasAttribute('data-up');
+        shiftDrug(this.getAttribute(up ? 'data-up' : 'data-down'), up ? -1 : 1);
+      };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-move]'), function (sel) {
+      sel.onchange = function () { placeAtEnd(this.getAttribute('data-move'), this.value, false); };
+    });
+  }
+
+  function arrName(d) {
+    return '<div><div class="name">' + esc(d.name) + (d.critical ? ' <span class="badge danger">ห้ามขาด</span>' : '') + '</div>' +
+      '<div class="meta">' + esc(d.strength) + ' · ' + esc(d.unit) + '</div></div>';
+  }
+
+  function drugById(id) { return S.state.drugs.filter(function (x) { return x.drug_id === id; })[0]; }
+
+  function placeAtEnd(id, loc, fromSearch) {
+    var d = drugById(id);
+    d.shelf_order = loc ? lastOrder(loc) + 10 : null;
+    d.location = loc;
+    saveLocs([d]);
+    if (fromSearch) { S.arrFilter = ''; $('arr-search').value = ''; }
+    renderArrangeLists();
+    if (fromSearch) $('arr-search').focus();
+  }
+
+  // Swap with the neighbour, then renumber the place 10, 20, 30… and save the rows that changed.
+  function shiftDrug(id, dir) {
+    var d = drugById(id), g = groupOf(d.location || '');
+    var i = g.indexOf(d), j = i + dir;
+    if (j < 0 || j >= g.length) return;
+    g[i] = g[j]; g[j] = d;
+    var changed = [];
+    g.forEach(function (x, k) { if (x.shelf_order !== (k + 1) * 10) { x.shelf_order = (k + 1) * 10; changed.push(x); } });
+    saveLocs(changed);
+    renderArrangeLists();
+  }
+
+  // Saves run one after another so quick taps arrive in order.
+  function saveLocs(list) {
+    if (!list.length) return;
+    var payload = list.map(function (d) { return { drug_id: d.drug_id, location: d.location || '', shelf_order: d.shelf_order }; });
+    S.locSaving++;
+    renderLocSave();
+    S.locQueue = S.locQueue.then(function () { return run('apiSaveLocations', payload); }).then(function () {
+      S.locSaving--;
+      renderLocSave();
+    }, function (e) {
+      S.locSaving--;
+      toast('บันทึกที่เก็บไม่สำเร็จ: ' + errMsg(e) + ' กำลังโหลดข้อมูลใหม่', true);
+      return reload(S.state.round ? S.state.round.round_id : null);
+    });
+  }
+
+  function renderLocSave() {
+    var el = $('arr-save');
+    if (el) el.innerHTML = S.locSaving ? '<span class="spinner"></span> กำลังบันทึก…' : 'บันทึกแล้ว';
   }
 
   // ------------------------------------------------------------------ form
@@ -820,6 +970,7 @@
   if (savedHead) { S.head.book = savedHead.book || ''; S.head.from = savedHead.from || S.head.from; S.head.to = savedHead.to || S.head.to; }
   S.opdSel = load('opdSel', {});
   S.opdQty = load('opdQty', {});
+  S.arrLoc = load('arrLoc', '');
   wire();
   var lastTab = load('tab', null);
   reload().then(function () { if (lastTab && S.state) showTab(lastTab); });
