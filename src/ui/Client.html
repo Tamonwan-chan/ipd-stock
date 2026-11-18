@@ -69,6 +69,10 @@
     var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
     return m ? (+m[3]) + ' ' + MONTHS[+m[2] - 1] + ' ' + (+m[1] + 543) : '';
   }
+  function parseIso(iso) { // 'YYYY-MM-DD…' → ms (UTC), or null
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+  }
   function thDateTime(s) {
     var m = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/.exec(s || '');
     return m ? thDate(m[1]) + ' ' + m[2] : (s || '');
@@ -387,7 +391,12 @@
     var opdCounted = r ? opdShelfDrugs().filter(function (d) { return lineOf(d).counted; }).length : 0;
     var approved = r && r.status === 'APPROVED';
     var received = r && !!r.received_at;
+    // Step 1 is done when the HOSxP data reaches within a week of the count date (or today).
+    var ref = parseIso(r ? r.count_date : st.today), to = parseIso(st.usage.to);
+    var fresh = !!(ref && to && ref - to <= 7 * 86400000);
     var steps = [
+      ['นำเข้าข้อมูล HOSxP', st.usage.to ? 'ข้อมูลถึง ' + thDate(st.usage.to) : 'ยังไม่มีข้อมูล',
+        fresh ? 'done' : '<button class="btn small" type="button" data-go="import">นำเข้า</button>'],
       ['พิมพ์ใบนับยา', '', '<button class="btn small" type="button" data-print-count>พิมพ์</button>'],
       ['กรอกยอดนับ', r ? c.counted + '/' + drugs.length + (opdShelfDrugs().length ? ' · OPD ' + opdCounted + '/' + opdShelfDrugs().length : '') : '', r && c.counted === drugs.length && drugs.length ? 'done' : ''],
       ['เบิกจริง / กล่อง', r ? 'ต้องเบิก ' + c.ordering + ' รายการ' : '', ''],
@@ -590,6 +599,7 @@
     $('round-card').innerHTML = roundSummary(false);
     $('round-card').onclick = function (e) {
       if (e.target.closest('[data-print-count]')) printCountSheet();
+      if (e.target.closest('[data-go="import"]')) showView('import');
     };
     if (S.reqMode === 'main') { renderCount(); renderForm(); }
     else renderOpd();
