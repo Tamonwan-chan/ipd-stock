@@ -112,9 +112,45 @@ var Schema = (function () {
         ['received_qty', 'number']
       ])
     },
+    // Web app logins (Auth.js). Passwords are stored only as a salted hash.
     Users: {
-      key: ['email'],
-      columns: cols([['email', 'string'], ['name', 'string'], ['role', 'string']])
+      key: ['username'],
+      columns: cols([
+        ['username', 'string'],
+        ['name', 'string'],
+        ['role', 'string'],
+        ['active', 'bool'],
+        ['pw_salt', 'string'],
+        ['pw_hash', 'string'],
+        ['created_at', 'datetime'],
+        ['last_login', 'datetime']
+      ])
+    },
+    // Who changed what and when (written by Api, read by the admin). Append-only.
+    ChangeLog: {
+      key: null,
+      columns: cols([
+        ['at', 'datetime'],
+        ['user', 'string'],
+        ['action', 'string'],
+        ['target', 'string'],
+        ['detail', 'string']
+      ])
+    },
+    // Expiry dates typed at a delivery check, one row per date per delivery line. A row
+    // leaves the stock when staff remove it (the lot is used up or was a typo).
+    Expiry: {
+      key: ['ref', 'drug_id', 'exp_date'],
+      columns: cols([
+        ['ref', 'string'],
+        ['drug_id', 'string'],
+        ['exp_date', 'date'],
+        ['source', 'string'],
+        ['added_at', 'datetime'],
+        ['added_by', 'string'],
+        ['removed_at', 'datetime'],
+        ['removed_by', 'string']
+      ])
     },
     // Scratch tab: the HOSxP export is pasted here, then cleared after import.
     Import: {
@@ -132,7 +168,8 @@ var Schema = (function () {
   };
 
   /** Tab order when creating the spreadsheet. */
-  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Users', 'Import'];
+  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Expiry',
+    'Users', 'ChangeLog', 'Import'];
 
   /** Allowed values for coded columns. */
   var ENUMS = {
@@ -142,7 +179,8 @@ var Schema = (function () {
     status: ['COUNTING', 'REVIEW', 'APPROVED'],
     kind: ['MONTHLY', 'URGENT'],
     opd_status: ['REQUESTED', 'RECEIVED', 'CANCELLED'],
-    role: ['counter', 'pharmacist', 'admin']
+    role: ['staff', 'admin'],
+    expiry_source: ['MAIN', 'OPD']
   };
 
   /** Notes written next to each setting (read by the admin in the Sheet, so in Thai). */

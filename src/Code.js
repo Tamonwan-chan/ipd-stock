@@ -32,7 +32,38 @@ function onOpen() {
     .addItem('คำนวณยอดที่ควรมีใหม่', 'recomputePar')
     .addSeparator()
     .addItem('ตั้งค่าแท็บข้อมูล', 'setupSheets')
+    .addItem('สร้างบัญชีผู้ดูแลระบบ / ตั้งรหัสใหม่', 'createAdmin')
     .addToUi();
+}
+
+/**
+ * Create an admin login for the web app, or reset an admin's password (Sheet owner only:
+ * the menu runs with the owner's access). Other users are managed in the web app.
+ */
+function createAdmin() {
+  var ui = SpreadsheetApp.getUi();
+  function ask(title, prompt) {
+    var r = ui.prompt(title, prompt, ui.ButtonSet.OK_CANCEL);
+    return r.getSelectedButton() === ui.Button.OK ? r.getResponseText().trim() : null;
+  }
+  var username = ask('บัญชีผู้ดูแลระบบ', 'ชื่อผู้ใช้ (ภาษาอังกฤษหรือตัวเลข ไม่มีช่องว่าง)');
+  if (!username) return;
+  var name = ask('บัญชีผู้ดูแลระบบ', 'ชื่อที่แสดง (เช่น ชื่อ-นามสกุล)');
+  if (name === null) return;
+  var pw = ask('บัญชีผู้ดูแลระบบ', 'รหัสผ่าน อย่างน้อย ' + Auth.MIN_PASSWORD + ' ตัวอักษร (จะเห็นตัวอักษรขณะพิมพ์ ระวังคนข้างๆ)');
+  if (!pw) return;
+  try {
+    var r = Db.withLock(function () {
+      Db.ensureSchema();
+      var res = Auth.saveUser({ username: username, name: name, role: 'admin', active: true, password: pw });
+      Api.setActor('เจ้าของชีต (เมนู)');
+      Api.log([[res.created ? 'เพิ่มผู้ใช้' : 'แก้ผู้ใช้', res.user.username, res.changes.join('; ')]]);
+      return res;
+    });
+    ui.alert((r.created ? 'สร้างบัญชี ' : 'ปรับบัญชี ') + r.user.username + ' เป็นผู้ดูแลระบบแล้ว เข้าสู่ระบบในหน้าเว็บได้เลย');
+  } catch (e) {
+    ui.alert('ไม่สำเร็จ: ' + e.message);
+  }
 }
 
 /** Create or update the database tabs (Db.ensureSchema). Safe to run again. */

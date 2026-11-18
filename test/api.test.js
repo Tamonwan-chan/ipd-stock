@@ -269,6 +269,103 @@ test('OPD requests: save, receive line by line, cancel; tabs created in an older
   assert.throws(() => Api.saveOpdReceived(req.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่อยู่ในรายการ/);
 });
 
+test('counting a drug fetched from OPD: count only, nothing requested; latest count in state', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  const slow = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Slow tab');
+  const saved = Api.saveLines(r.round_id, [{ drug_id: slow.drug_id, on_hand: 4, final_qty: 99, boxes: 1, pack_size: 10 }], ss);
+  assert.deepEqual([saved[slow.drug_id].on_hand, saved[slow.drug_id].suggested_qty, saved[slow.drug_id].final_qty], [4, '', '']);
+  const d = Api.state(null, ss).drugs.find(x => x.drug_id === slow.drug_id);
+  assert.deepEqual(d.last_count, { qty: 4, date: r.count_date });
+});
+
+test('change log: who did what, written by each change', () => {
+  const ss = setup();
+  Api.setActor('Nurse A');
+  const r = Api.startRound(ss);
+  const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: '' }], ss);
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: '' }], ss); // no change: no row
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 12, final_qty: 200 }], ss);
+  const log = Api.changeLog(3, ss); // newest first; the import before it is logged too
+  assert.deepEqual(log.map(x => [x.user, x.action]), [['Nurse A', 'นับ/เบิก'], ['Nurse A', 'นับ/เบิก'], ['Nurse A', 'เริ่มรอบนับ']]);
+  assert.match(log[0].detail, /เบิกจริง – → 200/);
+  assert.match(log[1].detail, /คงเหลือ – → 12/);
+  assert.equal(log[0].target, 'Busy tab 10 mg.');
+  assert.equal(Db.readTable('Rounds', ss)[0].counted_by, 'Nurse A');
+  Api.setActor('');
+});
+
+test('expiry dates at the delivery check: several per line, corrected, removed from the shelf', () => {
+  const ss = setup();
+  ss.sheets = ss.sheets.filter(sh => sh.name !== 'Expiry'); // older Sheet
+  const r = Api.startRound(ss);
+  const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 0, final_qty: 100 }], ss);
+  let res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 100, exp: ['2027-06-30', '2027-03-31', ''] }], ss);
+  assert.deepEqual(res.expiry.map(x => x.exp_date), ['2027-03-31', '2027-06-30']); // sorted, blanks ignored
+  assert.equal(res.expiry[0].source, 'MAIN');
+  // a typo fixed: 2027-06-30 was really 2027-07-31; quantity untouched when not sent
+  res = Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, exp: ['2027-03-31', '2027-07-31'] }], ss);
+  assert.deepEqual(res.expiry.map(x => x.exp_date), ['2027-03-31', '2027-07-31']);
+  assert.equal(res.lines[busy.drug_id], 100);
+  assert.throws(() => Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, exp: ['31/03/2027'] }], ss), /วันหมดอายุไม่ถูกต้อง/);
+  // the lot dated March is used up
+  const left = Api.removeExpiry(r.round_id, busy.drug_id, '2027-03-31', ss);
+  assert.deepEqual(left.map(x => x.exp_date), ['2027-07-31']);
+  assert.throws(() => Api.removeExpiry(r.round_id, busy.drug_id, '2027-03-31', ss), /ไม่พบ/);
+  assert.deepEqual(Api.state(null, ss).expiry.map(x => x.exp_date), ['2027-07-31']);
+  // OPD deliveries carry dates too
+  const slow = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Slow tab');
+  const req = Api.createOpdRequest('MONTHLY', [{ drug_id: slow.drug_id, qty: 5 }], '', ss);
+  const got = Api.saveOpdReceived(req.request_id, [{ drug_id: slow.drug_id, received_qty: 5, exp: ['2026-12-31'] }], ss);
+  assert.deepEqual(got.expiry.map(x => [x.exp_date, x.source]), [['2026-12-31', 'OPD'], ['2027-07-31', 'MAIN']]);
+  assert.ok(Api.changeLog(20, ss).some(x => x.action === 'ลบวันหมดอายุ'));
+});
+
+test('drugCard: counts, requests and deliveries from both sources, newest first', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
+  Api.saveLines(r.round_id, [{ drug_id: busy.drug_id, on_hand: 10, final_qty: 2, boxes: 2, pack_size: 1 }], ss);
+  Api.saveReceived(r.round_id, [{ drug_id: busy.drug_id, received_qty: 2, exp: ['2027-01-31'] }], ss);
+  Api.createOpdRequest('URGENT', [{ drug_id: busy.drug_id, qty: 20 }], '', ss);
+  const c = Api.drugCard(busy.drug_id, ss);
+  assert.equal(c.drug.hosxp_name, 'Busy tab');
+  assert.deepEqual(c.history.map(h => h.type), ['OPD', 'MAIN']); // same day: the OPD id sorts after the round id
+  const main = c.history.find(h => h.type === 'MAIN');
+  assert.deepEqual([main.on_hand, main.requested, main.boxes, main.received_qty], [10, 2, 2, 2]);
+  assert.deepEqual(c.expiry.map(x => x.exp_date), ['2027-01-31']);
+  assert.throws(() => Api.drugCard('D999', ss), /ไม่พบยา/);
+});
+
+test('saveDrug: edit in request units, add a new medicine, duplicates refused, logged', () => {
+  const ss = setup();
+  Api.setActor('Nurse B');
+  const slow = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Slow tab');
+  // a pharmacist decides to stock it: max 3 packs of 10 = 30 units (request unit = pack of 10)
+  Api.saveDrug({ drug_id: slow.drug_id, request_name: 'Slow tab 5 mg', request_unit: 'แผง', request_factor: 10,
+    source: 'MAIN', max: 3, min: 1, critical: false }, ss);
+  const d = Api.state(null, ss).drugs.find(x => x.drug_id === slow.drug_id);
+  assert.deepEqual([d.name, d.unit, d.stocked, d.source, d.par, d.min], ['Slow tab 5 mg', 'แผง', true, 'MAIN', 30, 10]);
+  const card = Api.drugCard(slow.drug_id, ss).drug;
+  assert.deepEqual([card.max, card.min, card.source], [3, 1, 'MAIN']);
+  assert.match(Api.changeLog(1, ss)[0].detail, /เบิกจาก – → MAIN/);
+
+  const id = Api.saveDrug({ hosxp_name: 'New syrup', strength: '60 ml', unit: 'ขวด', source: 'OPD' }, ss);
+  const n = Api.state(null, ss).drugs.find(x => x.drug_id === id);
+  assert.deepEqual([n.hosxp_name, n.source, n.stocked], ['New syrup', 'OPD', false]);
+  assert.equal(Api.changeLog(1, ss)[0].action, 'เพิ่มยา');
+  assert.throws(() => Api.saveDrug({ hosxp_name: 'new syrup', strength: '60 ml', unit: 'ขวด' }, ss), /มียานี้อยู่แล้ว/);
+  assert.throws(() => Api.saveDrug({ hosxp_name: 'X' }, ss), /หน่วย/);
+  assert.throws(() => Api.saveDrug({ drug_id: id, max: 1, min: 2 }, ss), /ต่ำสุดต้องไม่มากกว่าสูงสุด/);
+  assert.throws(() => Api.saveDrug({ drug_id: id, source: 'WARD' }, ss), /แหล่งเบิก/);
+  // the HOSxP name can't be changed on an existing medicine (later imports match by it)
+  Api.saveDrug({ drug_id: id, hosxp_name: 'Renamed', unit: 'ขวด', source: 'OPD' }, ss);
+  assert.equal(Api.drugCard(id, ss).drug.hosxp_name, 'New syrup');
+  Api.setActor('');
+});
+
 test('ui/Client.html: script parses', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/ui/Client.html'), 'utf8');
   const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');

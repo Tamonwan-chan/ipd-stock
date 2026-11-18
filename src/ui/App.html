@@ -9,110 +9,191 @@
   <?!= include('ui/Styles') ?>
 </head>
 <body>
-  <header class="app-header">
-    <h1>สต็อกยา IPD</h1>
-    <div id="hdr-status" class="muted small">กำลังโหลด…</div>
-  </header>
+  <!-- Login -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <h1>สต็อกยา IPD</h1>
+      <p class="muted small">ห้องยาผู้ป่วยใน · เข้าสู่ระบบด้วยบัญชีของตัวเอง ทุกการแก้ไขจะบันทึกชื่อผู้แก้และเวลา</p>
+      <label class="field">ชื่อผู้ใช้<input type="text" id="lg-user" autocomplete="username" autocapitalize="none" required></label>
+      <label class="field">รหัสผ่าน<input type="password" id="lg-pw" autocomplete="current-password" required></label>
+      <div id="login-msg" class="login-msg" role="alert"></div>
+      <button class="btn primary" id="btn-login" type="submit">เข้าสู่ระบบ</button>
+      <p class="muted small">ลืมรหัสผ่าน ให้ผู้ดูแลระบบตั้งรหัสใหม่ให้</p>
+    </form>
+  </div>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="import">1. นำเข้าข้อมูลการใช้ยา</button>
-    <button role="tab" data-tab="count">2. นับยาและคำนวณยอดเบิก</button>
-    <button role="tab" data-tab="form">3. ใบเบิก (คลัง)</button>
-    <button role="tab" data-tab="receive">4. ตรวจรับจากคลัง</button>
-    <button role="tab" data-tab="opd">5. ขอ/รับยาจาก OPD</button>
-    <button role="tab" data-tab="minmax">6. ป้ายสูงสุด/ต่ำสุด</button>
-  </nav>
-
-  <main>
-    <!-- 1. Import -->
-    <section id="tab-import" class="tab" hidden>
-      <div class="card">
-        <h2>นำเข้าข้อมูลการใช้ยาจาก HOSxP</h2>
-        <p class="muted small">ไฟล์รายงานการจ่ายยาผู้ป่วยในรายวัน (.xlsx, .xls หรือ .csv) ที่มีหัวคอลัมน์
-          order_date, drug_name, strength, drug_unit, total_quantity, unit_price
-          ถ้านำเข้าช่วงวันที่ที่มีอยู่แล้ว ข้อมูลวันนั้นจะถูกแทนที่ ไม่นับซ้ำ</p>
-        <label id="drop" class="drop">
-          <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
-          <div class="drop-main">ลากไฟล์มาวางที่นี่</div>
-          <div class="muted">หรือคลิกเพื่อเลือกไฟล์</div>
-        </label>
-        <div id="import-preview"></div>
-        <div id="import-result"></div>
-      </div>
-      <div class="card" id="data-status"></div>
-    </section>
-
-    <!-- 2. Count -->
-    <section id="tab-count" class="tab" hidden>
-      <div id="count-body"></div>
-    </section>
-
-    <!-- 3. Main-storage form -->
-    <section id="tab-form" class="tab" hidden>
-      <div class="card no-print">
-        <h2>ใบเบิกหรือใบส่งคืน (เบิกจากคลัง)</h2>
+  <!-- App -->
+  <div id="app" class="shell" hidden>
+    <aside class="side">
+      <div class="brand"><b>สต็อกยา IPD</b><span class="muted small">ห้องยาผู้ป่วยใน</span></div>
+      <nav id="nav" class="nav" aria-label="เมนู">
+        <button data-view="home">หน้าหลัก</button>
+        <button data-view="drugs">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
+        <button data-view="request">เบิกยา</button>
+        <button data-view="receive">ตรวจรับยา<span class="nav-count" id="nav-recv" hidden></span></button>
+        <button data-view="import">นำเข้าข้อมูล HOSxP</button>
+        <button data-view="minmax">ป้ายสูงสุด/ต่ำสุด</button>
+        <div class="nav-group admin-only" hidden>ผู้ดูแลระบบ</div>
+        <button data-view="users" class="admin-only" hidden>ผู้ใช้งาน</button>
+        <button data-view="log" class="admin-only" hidden>ประวัติการแก้ไข</button>
+      </nav>
+      <div class="me">
+        <div><b id="me-name"></b> <span id="me-role" class="muted small"></span></div>
         <div class="row small">
-          <label>เล่มที่ <input type="text" id="fh-book" size="6"></label>
-          <label>เลขที่ <input type="text" id="fh-no" size="8"></label>
-          <label>จาก <input type="text" id="fh-from" size="22"></label>
-          <label>ถึง <input type="text" id="fh-to" size="14"></label>
-          <label>วันที่ <input type="text" id="fh-date" size="14"></label>
-        </div>
-        <div class="row">
-          <button class="btn primary" id="btn-print-form">พิมพ์ใบเบิก</button>
-          <button class="btn" id="btn-csv-form">ดาวน์โหลด Excel (.csv)</button>
-          <button class="btn" id="btn-copy-form">คัดลอกรายการ</button>
-          <span id="form-summary" class="muted small"></span>
+          <button class="link" id="btn-pw" type="button">เปลี่ยนรหัสผ่าน</button>
+          <button class="link" id="btn-logout" type="button">ออกจากระบบ</button>
         </div>
       </div>
-      <div id="form-pages" class="paper-wrap"></div>
-    </section>
+    </aside>
 
-    <!-- 4. Delivery check, main storage -->
-    <section id="tab-receive" class="tab" hidden>
-      <div id="receive-body"></div>
-    </section>
+    <main class="main">
+      <div id="hdr-status" class="muted small topline">กำลังโหลด…</div>
 
-    <!-- 5. OPD: request and receive -->
-    <section id="tab-opd" class="tab" hidden>
-      <div id="opd-open" class="no-print"></div>
-      <div class="card no-print">
-        <h2>ขอยาจากห้องยา OPD</h2>
-        <p class="muted small">ยาที่ใช้ไม่บ่อย (น้อยกว่าสัปดาห์ละครั้ง) และยาราคาสูงที่ใช้ไม่บ่อย ไม่ต้องสต็อก ให้ไปขอจาก OPD เดือนละครั้ง
-          เลือกเฉพาะรายการที่จะขอ จำนวนที่แนะนำ = ใช้เฉลี่ยใน <span id="opd-cycle-days">30</span> วัน (แก้ได้)
-          ยาที่เบิกคลังแต่เหลือต่ำกว่า min ให้ติ๊ก แสดงยาที่เบิกคลังด้วย แล้วใส่จำนวนที่จะขอ (ประเภท ด่วน)
-          กด บันทึกและพิมพ์ แล้วเมื่อได้ยามา ให้ใส่จำนวนที่ได้รับในส่วน รอรับจาก OPD</p>
-        <div class="row">
-          <input type="search" id="opd-search" placeholder="ค้นหายา">
-          <label class="check small"><input type="checkbox" id="opd-all"> แสดงยาที่เบิกคลังด้วย</label>
-          <button class="btn" id="btn-opd-clear">ล้างที่เลือก</button>
-          <span class="spacer"></span>
-          <label class="small">ประเภท <select id="opd-kind"><option value="MONTHLY">ประจำเดือน</option><option value="URGENT">ด่วน (ยาใกล้หมด)</option></select></label>
-          <button class="btn primary" id="btn-save-opd">บันทึกและพิมพ์</button>
-          <button class="btn" id="btn-copy-opd">คัดลอก</button>
+      <!-- Home -->
+      <section id="view-home" class="view" hidden></section>
+
+      <!-- Medicines: list + stock card -->
+      <section id="view-drugs" class="view" hidden>
+        <div class="split">
+          <div class="card" id="drug-list-card">
+            <div class="row"><h2>รายการยา</h2><span class="spacer"></span>
+              <button class="btn" id="btn-add-drug" type="button">+ เพิ่มยา</button></div>
+            <input type="search" id="drug-q" placeholder="ค้นหายา ชื่อ ขนาด หรือหมายเลขพัสดุ" aria-label="ค้นหายา">
+            <div class="row chips" id="drug-chips"></div>
+            <div id="drug-table" class="table-wrap"></div>
+          </div>
+          <div id="drug-card"></div>
         </div>
-        <div id="opd-list"></div>
-      </div>
-      <div id="opd-history" class="no-print"></div>
-      <div id="opd-print"></div>
-    </section>
+      </section>
 
-    <!-- 6. Min/max shelf list -->
-    <section id="tab-minmax" class="tab" hidden>
-      <div class="card no-print">
-        <h2>ป้ายยอดสูงสุด / ต่ำสุด สำหรับติดที่ชั้นยา</h2>
-        <p class="muted small">สูงสุด = เบิกเติมให้ถึงยอดนี้ทุกรอบ · ต่ำสุด = ถ้าเหลือน้อยกว่านี้ ให้ขอจาก OPD วันนี้
-          (หน่วยตามที่เบิก ปัดขึ้นเป็นจำนวนเต็ม) ยอดเปลี่ยนทุกครั้งที่นำเข้าข้อมูลใหม่ ควรพิมพ์ใหม่เมื่อยอดเปลี่ยน</p>
-        <div class="row">
-          <button class="btn primary" id="btn-print-mm">พิมพ์ป้าย</button>
-          <button class="btn" id="btn-csv-mm">ดาวน์โหลด Excel (.csv)</button>
-          <span id="mm-summary" class="muted small"></span>
+      <!-- Requisitions: main storage every 2 weeks, or OPD -->
+      <section id="view-request" class="view" hidden>
+        <div class="seg" role="tablist" aria-label="เบิกจาก">
+          <button role="tab" data-mode="main">เบิกจากคลัง (ทุก 2 สัปดาห์)</button>
+          <button role="tab" data-mode="opd">เบิกจาก OPD</button>
         </div>
-      </div>
-      <div id="mm-print" class="paper-wrap"></div>
-    </section>
-  </main>
 
+        <div id="req-main">
+          <div id="round-card"></div>
+          <div class="seg sub" role="tablist" aria-label="ขั้นตอน">
+            <button role="tab" data-sub="count">นับยาและยอดเบิก</button>
+            <button role="tab" data-sub="form">ใบเบิก</button>
+          </div>
+          <div id="sub-count"><div id="count-body"></div></div>
+          <div id="sub-form" hidden>
+            <div class="card">
+              <h2>ใบเบิกหรือใบส่งคืน (เบิกจากคลัง)</h2>
+              <div class="row small">
+                <label>เล่มที่ <input type="text" id="fh-book" size="6"></label>
+                <label>เลขที่ <input type="text" id="fh-no" size="8"></label>
+                <label>จาก <input type="text" id="fh-from" size="22"></label>
+                <label>ถึง <input type="text" id="fh-to" size="14"></label>
+                <label>วันที่ <input type="text" id="fh-date" size="14"></label>
+              </div>
+              <div class="row">
+                <button class="btn primary" id="btn-print-form" type="button">พิมพ์ใบเบิก</button>
+                <button class="btn" id="btn-csv-form" type="button">ดาวน์โหลด Excel (.csv)</button>
+                <button class="btn" id="btn-copy-form" type="button">คัดลอกรายการ</button>
+                <span id="form-summary" class="muted small"></span>
+              </div>
+            </div>
+            <div id="form-pages" class="paper-wrap"></div>
+          </div>
+        </div>
+
+        <div id="req-opd" hidden>
+          <div class="card">
+            <h2>ขอยาจากห้องยา OPD</h2>
+            <p class="muted small">ยาที่ใช้ไม่บ่อย (น้อยกว่าสัปดาห์ละครั้ง) ไม่ต้องสต็อกเต็ม ให้ขอจาก OPD เดือนละครั้ง
+              จำนวนที่แนะนำ = ใช้เฉลี่ยใน <span id="opd-cycle-days">30</span> วัน ลบด้วยคงเหลือที่นับล่าสุด (ถ้านับภายในรอบนี้) แก้ได้
+              ยาที่เบิกคลังแต่เหลือต่ำกว่าต่ำสุด ให้ติ๊ก แสดงยาที่เบิกคลังด้วย แล้วใส่จำนวนที่จะขอ (ประเภท ด่วน)
+              กด บันทึกและพิมพ์ เมื่อได้ยามาแล้ว ตรวจรับที่เมนู ตรวจรับยา</p>
+            <div class="row">
+              <input type="search" id="opd-search" placeholder="ค้นหายา" aria-label="ค้นหายา">
+              <label class="check small"><input type="checkbox" id="opd-all"> แสดงยาที่เบิกคลังด้วย</label>
+              <button class="btn" id="btn-opd-clear" type="button">ล้างที่เลือก</button>
+              <span class="spacer"></span>
+              <label class="small">ประเภท <select id="opd-kind"><option value="MONTHLY">ประจำเดือน</option><option value="URGENT">ด่วน (ยาใกล้หมด)</option></select></label>
+              <button class="btn primary" id="btn-save-opd" type="button">บันทึกและพิมพ์</button>
+              <button class="btn" id="btn-copy-opd" type="button">คัดลอก</button>
+            </div>
+            <div id="opd-list"></div>
+          </div>
+          <div id="opd-history"></div>
+        </div>
+      </section>
+
+      <!-- Delivery checks -->
+      <section id="view-receive" class="view" hidden>
+        <div id="receive-body"></div>
+        <div id="opd-open"></div>
+      </section>
+
+      <!-- Import -->
+      <section id="view-import" class="view" hidden>
+        <div class="card">
+          <h2>นำเข้าข้อมูลการใช้ยาจาก HOSxP</h2>
+          <p class="muted small">ไฟล์รายงานการจ่ายยาผู้ป่วยในรายวัน (.xlsx, .xls หรือ .csv) ที่มีหัวคอลัมน์
+            order_date, drug_name, strength, drug_unit, total_quantity, unit_price
+            ถ้านำเข้าช่วงวันที่ที่มีอยู่แล้ว ข้อมูลวันนั้นจะถูกแทนที่ ไม่นับซ้ำ ควรนำเข้าก่อนนับยาทุกรอบ</p>
+          <label id="drop" class="drop">
+            <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+            <div class="drop-main">ลากไฟล์มาวางที่นี่</div>
+            <div class="muted">หรือคลิกเพื่อเลือกไฟล์</div>
+          </label>
+          <div id="import-preview"></div>
+          <div id="import-result"></div>
+        </div>
+        <div class="card" id="data-status"></div>
+      </section>
+
+      <!-- Min/max shelf list -->
+      <section id="view-minmax" class="view" hidden>
+        <div class="card">
+          <h2>ป้ายยอดสูงสุด / ต่ำสุด สำหรับติดที่ชั้นยา</h2>
+          <p class="muted small">สูงสุด = เบิกเติมให้ถึงยอดนี้ทุกรอบ · ต่ำสุด = ถ้าเหลือน้อยกว่านี้ ให้ขอจาก OPD วันนี้
+            (หน่วยตามที่เบิก ปัดขึ้นเป็นจำนวนเต็ม) ยอดเปลี่ยนทุกครั้งที่นำเข้าข้อมูลใหม่ ควรพิมพ์ใหม่เมื่อยอดเปลี่ยน</p>
+          <div class="row">
+            <button class="btn primary" id="btn-print-mm" type="button">พิมพ์ป้าย</button>
+            <button class="btn" id="btn-csv-mm" type="button">ดาวน์โหลด Excel (.csv)</button>
+            <span id="mm-summary" class="muted small"></span>
+          </div>
+        </div>
+        <div id="mm-print" class="paper-wrap"></div>
+      </section>
+
+      <!-- Admin: users -->
+      <section id="view-users" class="view" hidden>
+        <div id="users-body"></div>
+      </section>
+
+      <!-- Admin: change log -->
+      <section id="view-log" class="view" hidden>
+        <div class="card">
+          <div class="row"><h2>ประวัติการแก้ไข</h2><span class="spacer"></span>
+            <button class="btn" id="btn-log-refresh" type="button">โหลดใหม่</button></div>
+          <p class="muted small">ใครแก้อะไร เมื่อไร (500 รายการล่าสุด) ข้อมูลทั้งหมดอยู่ในแท็บ ChangeLog ของชีต</p>
+          <input type="search" id="log-q" placeholder="ค้นหา ชื่อผู้ใช้ ยา หรือการกระทำ" aria-label="ค้นหาประวัติ">
+          <div id="log-table" class="table-wrap"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Change password -->
+  <dialog id="dlg-pw">
+    <form id="pw-form" method="dialog" class="stack">
+      <h2>เปลี่ยนรหัสผ่าน</h2>
+      <label class="field">รหัสผ่านเดิม<input type="password" id="pw-old" autocomplete="current-password" required></label>
+      <label class="field">รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)<input type="password" id="pw-new" autocomplete="new-password" required minlength="6"></label>
+      <label class="field">ใส่รหัสผ่านใหม่อีกครั้ง<input type="password" id="pw-new2" autocomplete="new-password" required minlength="6"></label>
+      <div id="pw-msg" class="login-msg" role="alert"></div>
+      <div class="row"><button class="btn primary" id="btn-pw-save" type="submit" value="save">บันทึก</button>
+        <button class="btn" id="btn-pw-cancel" type="button">ยกเลิก</button></div>
+    </form>
+  </dialog>
+
+  <div id="print-area"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
