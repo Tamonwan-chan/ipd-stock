@@ -112,3 +112,7 @@ tools/       เครื่องมือทดสอบสูตรกับ�
 ```
 
 repo นี้เป็นสาธารณะ เก็บเฉพาะโค้ดและเอกสาร ข้อมูลยาและการใช้ยาอยู่ใน Google Sheet เท่านั้น
+
+## เครดิต
+
+ไอคอนในหน้าเว็บจากชุด [Guidance](https://www.streamlinehq.com/icons/guidance) ของ [Streamline](https://www.streamlinehq.com) สัญญาอนุญาต [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (ปรับความหนาเส้นให้อ่านง่ายขึ้น)

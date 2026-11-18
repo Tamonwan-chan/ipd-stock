@@ -27,22 +27,23 @@
     <aside class="side">
       <div class="brand"><b>สต็อกยา IPD</b><span class="muted small">ห้องยาผู้ป่วยใน</span></div>
       <nav id="nav" class="nav" aria-label="เมนู">
-        <button data-view="home">หน้าหลัก</button>
-        <button data-view="drugs">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
-        <button data-view="request">เบิกยา</button>
-        <button data-view="receive">ตรวจรับยา<span class="nav-count" id="nav-recv" hidden></span></button>
-        <button data-view="import">นำเข้าข้อมูล HOSxP</button>
-        <button data-view="minmax">ป้ายสูงสุด/ต่ำสุด</button>
+        <button data-view="home" data-icon="home-2">หน้าหลัก</button>
+        <button data-view="drugs" data-icon="pharmacy">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
+        <button data-view="request" data-icon="shop">เบิกยา</button>
+        <button data-view="receive" data-icon="mailbox">ตรวจรับยา<span class="nav-count" id="nav-recv" hidden></span></button>
+        <button data-view="import" data-icon="folder">นำเข้าข้อมูล HOSxP</button>
+        <button data-view="minmax" data-icon="printer">ป้ายสูงสุด/ต่ำสุด</button>
         <div class="nav-group admin-only" hidden>ผู้ดูแลระบบ</div>
-        <button data-view="users" class="admin-only" hidden>ผู้ใช้งาน</button>
-        <button data-view="log" class="admin-only" hidden>ประวัติการแก้ไข</button>
+        <button data-view="users" data-icon="user-2" class="admin-only" hidden>ผู้ใช้งาน</button>
+        <button data-view="log" data-icon="clock" class="admin-only" hidden>ประวัติการแก้ไข</button>
       </nav>
       <div class="me">
         <div><b id="me-name"></b> <span id="me-role" class="muted small"></span></div>
         <div class="row small">
-          <button class="link" id="btn-pw" type="button">เปลี่ยนรหัสผ่าน</button>
-          <button class="link" id="btn-logout" type="button">ออกจากระบบ</button>
+          <button class="link" id="btn-pw" type="button" data-icon="lock">เปลี่ยนรหัสผ่าน</button>
+          <button class="link" id="btn-logout" type="button" data-icon="exit">ออกจากระบบ</button>
         </div>
+        <a class="credit" href="https://www.streamlinehq.com" target="_blank" rel="noopener">ไอคอนจาก Streamline</a>
       </div>
     </aside>
 
@@ -91,7 +92,7 @@
                 <label>วันที่ <input type="text" id="fh-date" size="14"></label>
               </div>
               <div class="row">
-                <button class="btn primary" id="btn-print-form" type="button">พิมพ์ใบเบิก</button>
+                <button class="btn primary" id="btn-print-form" type="button" data-icon="printer">พิมพ์ใบเบิก</button>
                 <button class="btn" id="btn-csv-form" type="button">ดาวน์โหลด Excel (.csv)</button>
                 <button class="btn" id="btn-copy-form" type="button">คัดลอกรายการ</button>
                 <span id="form-summary" class="muted small"></span>
@@ -114,7 +115,7 @@
               <button class="btn" id="btn-opd-clear" type="button">ล้างที่เลือก</button>
               <span class="spacer"></span>
               <label class="small">ประเภท <select id="opd-kind"><option value="MONTHLY">ประจำเดือน</option><option value="URGENT">ด่วน (ยาใกล้หมด)</option></select></label>
-              <button class="btn primary" id="btn-save-opd" type="button">บันทึกและพิมพ์</button>
+              <button class="btn primary" id="btn-save-opd" type="button" data-icon="printer">บันทึกและพิมพ์</button>
               <button class="btn" id="btn-copy-opd" type="button">คัดลอก</button>
             </div>
             <div id="opd-list"></div>
@@ -154,7 +155,7 @@
           <p class="muted small">สูงสุด = เบิกเติมให้ถึงยอดนี้ทุกรอบ · ต่ำสุด = ถ้าเหลือน้อยกว่านี้ ให้ขอจาก OPD วันนี้
             (หน่วยตามที่เบิก ปัดขึ้นเป็นจำนวนเต็ม) ยอดเปลี่ยนทุกครั้งที่นำเข้าข้อมูลใหม่ ควรพิมพ์ใหม่เมื่อยอดเปลี่ยน</p>
           <div class="row">
-            <button class="btn primary" id="btn-print-mm" type="button">พิมพ์ป้าย</button>
+            <button class="btn primary" id="btn-print-mm" type="button" data-icon="printer">พิมพ์ป้าย</button>
             <button class="btn" id="btn-csv-mm" type="button">ดาวน์โหลด Excel (.csv)</button>
             <span id="mm-summary" class="muted small"></span>
           </div>

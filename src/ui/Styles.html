@@ -115,6 +115,15 @@
   .btn.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
   .btn:disabled { opacity: .5; cursor: default; }
   .btn.small { padding: 3px 10px; font-size: 13px; }
+  /* icons (Streamline Guidance, 1px on 24x24: thickened to read at 18px) */
+  .ic { width: 18px; height: 18px; flex: none; vertical-align: -4px; margin-right: 6px; }
+  .ic path, .ic g { stroke-width: 1.6; }
+  .btn.small .ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 4px; }
+  .nav .ic { width: 20px; height: 20px; margin-right: 0; opacity: .85; }
+  .nav button[aria-current="page"] .ic { opacity: 1; }
+  .link .ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 3px; }
+  .credit { font-size: 11px; color: var(--muted); }
+  @media print { .ic { display: none; } }
   input[type=number], input[type=text], input[type=search], input[type=password], input[type=date], select {
     border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface);
     min-width: 0;
