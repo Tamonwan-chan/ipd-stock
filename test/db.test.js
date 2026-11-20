@@ -1,3 +1,13 @@
+/*
+ * สต็อกยา IPD
+ * ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+ * Copyright © 2026 Tamonwan Chankaew. All rights reserved.
+ * Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+ * ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาต ดูเงื่อนไขในไฟล์ LICENSE
+ * No use, copying or modification without written permission. See LICENSE.
+ * Contact: tamonwanchankaew@gmail.com
+ * กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+ */
 // Tests for src/Db.js against an in-memory spreadsheet. Synthetic data only.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -54,23 +64,23 @@ test('ensureSchema: refreshes stale notes, keeps values, reports unused keys', (
 
 test('ensureSchema: adds missing columns at the end, keeps order and data', () => {
   const ss = new FakeSpreadsheet();
-  const sh = ss.insertSheet('Users');
-  sh.getRange(1, 1, 2, 2).setValues([['name', 'email'], ['Somchai', 'a@example.com']]);
+  const sh = ss.insertSheet('OpdLines');
+  sh.getRange(1, 1, 2, 3).setValues([['drug_id', 'note', 'request_id'], ['D001', 'by hand', 'OPD-1']]);
   const r = Db.ensureSchema(ss);
-  assert.deepEqual(r.addedColumns, { Users: ['role'] });
-  assert.deepEqual(sh.dump(), [['name', 'email', 'role'], ['Somchai', 'a@example.com', '']]);
-  assert.deepEqual(strip(Db.readTable('Users', ss)), [{ name: 'Somchai', email: 'a@example.com', role: '' }]);
+  assert.deepEqual(r.addedColumns, { OpdLines: ['qty', 'received_qty'] });
+  assert.deepEqual(sh.dump(), [['drug_id', 'note', 'request_id', 'qty', 'received_qty'], ['D001', 'by hand', 'OPD-1', '', '']]);
+  assert.deepEqual(strip(Db.readTable('OpdLines', ss)), [{ drug_id: 'D001', note: 'by hand', request_id: 'OPD-1', qty: '', received_qty: '' }]);
 });
 
 test('ensureColumns: adds the missing columns of one tab, formatted; no-op when complete', () => {
   const ss = fresh();
   assert.deepEqual(Db.ensureColumns('Rounds', ss), []);
-  const sh = ss.getSheetByName('Users');
-  sh.grid = [['email', 'name']];
+  const sh = ss.getSheetByName('Users'); // an older Sheet: Users keyed by email
+  sh.grid = [['email', 'name', 'role']];
   sh.formats = {};
-  assert.deepEqual(Db.ensureColumns('Users', ss), ['role']);
-  assert.deepEqual(sh.dump()[0], ['email', 'name', 'role']);
-  assert.equal(sh.formats[3], '@');
+  assert.deepEqual(Db.ensureColumns('Users', ss), ['username', 'active', 'pw_salt', 'pw_hash', 'created_at', 'last_login']);
+  assert.deepEqual(sh.dump()[0], ['email', 'name', 'role', 'username', 'active', 'pw_salt', 'pw_hash', 'created_at', 'last_login']);
+  assert.equal(sh.formats[4], '@');
   assert.throws(() => Db.ensureColumns('Nope', ss), /Unknown table|not found/);
   // a tab that doesn't exist yet is created with its header
   ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdLines');

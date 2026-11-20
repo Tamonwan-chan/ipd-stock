@@ -1,3 +1,13 @@
+/*
+ * สต็อกยา IPD
+ * ลิขสิทธิ์ © 2569 (2026) ภญ.ธมลวรรณ จันทร์แก้ว สงวนลิขสิทธิ์
+ * Copyright © 2026 Tamonwan Chankaew. All rights reserved.
+ * Designed & Developed by ภญ.ธมลวรรณ จันทร์แก้ว
+ * ห้ามคัดลอก ดัดแปลง หรือนำไปใช้โดยไม่ได้รับอนุญาต ดูเงื่อนไขในไฟล์ LICENSE
+ * No use, copying or modification without written permission. See LICENSE.
+ * Contact: tamonwanchankaew@gmail.com
+ * กลุ่มงานเภสัชกรรม โรงพยาบาลสันกำแพง จังหวัดเชียงใหม่
+ */
 /**
  * Schema.js — tabs and columns of the "IPD Stock" spreadsheet (DESIGN §4).
  *
@@ -70,7 +80,12 @@ var Schema = (function () {
         ['approved_at', 'datetime'],
         ['note', 'string'],
         ['received_at', 'datetime'],
-        ['received_by', 'string']
+        ['received_by', 'string'],
+        ['req_no', 'string'],     // ใบเบิก number, given at approval (บ.69/0001)
+        ['receipt_no', 'string'], // ใบรับ number, given when the delivery check is confirmed (ร.69/0001)
+        ['kind', 'string'],       // '' = the 2-week round; EXTRA = ใบเบิกพิเศษ (extra request, no count)
+        ['count_printed_at', 'datetime'], // last time the count sheet was printed for this round (step 2)
+        ['form_printed_at', 'datetime']   // last time the approved ใบเบิก was printed (step 6)
       ])
     },
     RoundLines: {
@@ -100,7 +115,9 @@ var Schema = (function () {
         ['requested_by', 'string'],
         ['received_at', 'datetime'],
         ['received_by', 'string'],
-        ['note', 'string']
+        ['note', 'string'],
+        ['req_no', 'string'],     // same series as Rounds.req_no
+        ['receipt_no', 'string']  // same series as Rounds.receipt_no
       ])
     },
     OpdLines: {
@@ -112,9 +129,45 @@ var Schema = (function () {
         ['received_qty', 'number']
       ])
     },
+    // Web app logins (Auth.js). Passwords are stored only as a salted hash.
     Users: {
-      key: ['email'],
-      columns: cols([['email', 'string'], ['name', 'string'], ['role', 'string']])
+      key: ['username'],
+      columns: cols([
+        ['username', 'string'],
+        ['name', 'string'],
+        ['role', 'string'],
+        ['active', 'bool'],
+        ['pw_salt', 'string'],
+        ['pw_hash', 'string'],
+        ['created_at', 'datetime'],
+        ['last_login', 'datetime']
+      ])
+    },
+    // Who changed what and when (written by Api, read by the admin). Append-only.
+    ChangeLog: {
+      key: null,
+      columns: cols([
+        ['at', 'datetime'],
+        ['user', 'string'],
+        ['action', 'string'],
+        ['target', 'string'],
+        ['detail', 'string']
+      ])
+    },
+    // Expiry dates typed at a delivery check, one row per date per delivery line. A row
+    // leaves the stock when staff remove it (the lot is used up or was a typo).
+    Expiry: {
+      key: ['ref', 'drug_id', 'exp_date'],
+      columns: cols([
+        ['ref', 'string'],
+        ['drug_id', 'string'],
+        ['exp_date', 'date'],
+        ['source', 'string'],
+        ['added_at', 'datetime'],
+        ['added_by', 'string'],
+        ['removed_at', 'datetime'],
+        ['removed_by', 'string']
+      ])
     },
     // Scratch tab: the HOSxP export is pasted here, then cleared after import.
     Import: {
@@ -132,17 +185,20 @@ var Schema = (function () {
   };
 
   /** Tab order when creating the spreadsheet. */
-  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Users', 'Import'];
+  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Expiry',
+    'Users', 'ChangeLog', 'Import'];
 
   /** Allowed values for coded columns. */
   var ENUMS = {
     source: ['MAIN', 'OPD', 'NONE'],
     source_calc: ['MAIN', 'OPD'],
     location: ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา'],
-    status: ['COUNTING', 'REVIEW', 'APPROVED'],
+    status: ['COUNTING', 'REVIEW', 'APPROVED', 'CANCELLED'], // CANCELLED: ใบเบิกพิเศษ only
+    round_kind: ['', 'EXTRA'],
     kind: ['MONTHLY', 'URGENT'],
     opd_status: ['REQUESTED', 'RECEIVED', 'CANCELLED'],
-    role: ['counter', 'pharmacist', 'admin']
+    role: ['staff', 'admin'],
+    expiry_source: ['MAIN', 'OPD']
   };
 
   /** Notes written next to each setting (read by the admin in the Sheet, so in Thai). */

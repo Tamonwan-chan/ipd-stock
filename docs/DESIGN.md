@@ -1,12 +1,15 @@
 # Design: IPD stock tool (Google Apps Script + Google Sheets)
 
-Status: **draft v0.4**, 16 Nov 2026. Based on [PRD.md](PRD.md), IPD staff answers to PRD section 7, OPD's reply on the requisition format, IPD's main-storage requisition form, and an analysis of 3 months of HOSxP dispensing data (§5.1).
+Status: **v0.5**, 19 Nov 2026. Based on [PRD.md](PRD.md), IPD staff answers to PRD section 7, OPD's reply on the requisition format, IPD's main-storage requisition form, and an analysis of 3 months of HOSxP dispensing data (§5.1).
 
 Changes from v0.1: no pack boxes (OPD accepts plain units); IPD lines are added to OPD's own requisition; usage is stored daily.
 Changes from v0.2: par uses the standard periodic-review safety-stock formula (it beat the percentile method at equal stock); liquids dispensed per ml are counted and requested in whole bottles; expensive, infrequent drugs get their own tier; home medications (HM) confirmed to come from IPD stock, so they stay in the usage data.
 Changes from v0.3 (issues #1–#4): IPD requests from **main storage (คลัง) every 2 weeks** on its own form ใบเบิกหรือใบส่งคืน, no longer through OPD's weekly requisition; drugs used **less than weekly** are fetched from OPD instead, as a separate, optional request; quantities stay in units. A shelf min (ยอดต่ำสุด) warns when stock won't last until the delivery.
 Dropped on 16 Nov: the 1-pack rule (main storage when the busiest cycle used ≥ 80% of a pack). Main storage's pack sizes change often and IPD requests in units, so pack sizes are not tracked.
 Added on 18 Nov (staff request): optional whole-box lines on the main-storage form. Staff type boxes and units per box on a count line; the form then shows `1x1000` under จำนวนเบิกใหม่ and `1` under จ่ายหรือรับคืน. The last units per box typed is remembered per drug (`Drugs.pack_size`) and offered next round, so a changed box size is visible and corrected by hand. Pack sizes still play no part in par, min or the suggested quantity.
+Changes from v0.4 (web app v2, 18 Nov; opened to staff 19 Nov): the app's own logins with roles and a change log (§7); counting on a printed count sheet at the shelf, typed in at a PC; staff do the HOSxP import in the web app; delivery checks with expiry dates and document numbers (§6).
+
+Changes on 20 Nov (from the first teaching round with IPD staff): menu in the order of the work; ใบเบิกพิเศษ, an extra main-storage request between rounds (`Rounds.kind = EXTRA`); a warning at the delivery check when what came expires within 3 months; the stock card reloads when รายการยา is shown again; the icon credit moved to the About dialog.
 
 ## 1. What round 1 must do
 
@@ -17,13 +20,13 @@ From PRD section 2, nothing more:
 3. Produce a **main-storage requisition** laid out like the paper form ใบเบิกหรือใบส่งคืน: drug name, unit, on-hand, quantity in dispensing units (e.g. `Vitamin B complex 1500 เม็ด`) (§6).
 4. Produce a separate, optional, monthly **OPD list** for drugs used less than weekly (§5.2).
 
-Out of scope for round 1: automatic stock deduction, live HIS integration, expiry tracking, receiving/check-in records.
+Out of scope for round 1: automatic stock deduction, live HIS integration, expiry alerts for stock on the shelf. Delivery checks with expiry dates were added on 18 Nov at the owner's request (§6); on 20 Nov the check also warns about short-dated deliveries (within 3 months).
 
 ## 2. Constraints that shape the design
 
 | Fact (source) | Design consequence |
 | :- | :- |
-| One pharmacy technician counts and orders, 30–60 min, timing unpredictable (Q7) | Counting must be fast, resumable, and work at the shelf → mobile web page with autosave. Keep the stock list short (§5.2) |
+| One pharmacy technician counts and orders, 30–60 min, timing unpredictable (Q7) | Counting must be fast and resumable → a printed count sheet filled in at the shelf, then typed in at a PC with autosave (18 Nov). Keep the stock list short (§5.2) |
 | IPD has no usable computer/printer; prints at the warehouse or OPD (Q10) | Everything runs in a browser; output works from any PC |
 | Pharmacist reviews but often can't check every line (Q8) | Review screen shows **exceptions first** |
 | IPD requests from main storage every 2 weeks, independent of the monthly OPD requests (16–17 Nov) | Demand window = count day through the delivery after next = 16 days + `delay_days` (§5). Count Tuesday morning, delivery Wednesday afternoon |
@@ -38,7 +41,7 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 ```
 ┌──────────────── Google Sheet "IPD Stock" (database, private) ────────────────┐
 │ Settings │ Drugs │ UsageDaily │ Rounds │ RoundLines │ OpdRequests │ OpdLines │ │
-│ Users │ Import                                                               │
+│ Expiry │ Users │ ChangeLog │ Import                                            │
 └────────────────────────────────▲─────────────────────────────────────────────┘
                                  │ SpreadsheetApp (bound script)
 ┌────────────────────────────────┴─────────────────────────────────────────────┐
@@ -47,21 +50,21 @@ Out of scope for round 1: automatic stock deduction, live HIS integration, expir
 │  Schema.js tabs, columns and column types (plain data)                       │
 │  Db.js     read/write sheets as arrays of objects, LockService (Node-tested) │
 │  Import.js HOSxP rows → UsageDaily, new drugs → Drugs, recompute par        │
-│  Api.js    web app server calls: state, import file, rounds, save lines      │
+│  Auth.js   web app logins: hashed passwords, sessions, roles                 │
+│  Api.js    web app server calls (each checks the session), change log        │
 │  Code.js   onOpen menu (admin) + doGet web app                               │
 │  ui/       App.html (page), Styles.html, Client.html (browser JS)            │
 └────────────┬───────────────────────────┬─────────────────────────────────────┘
-     Sheet menu (admin)           Web app (HtmlService), one page, six tabs
-     - import usage (paste)       - 1 import: drag a HOSxP file (.xlsx/.xls/.csv)
-     - recompute par              - 2 count: on-hand → suggested qty, autosave
-     - create tabs                - 3 main-storage form: print / CSV / copy
-                                  - 4 delivery check from main storage
-                                  - 5 OPD: save + print a request, check what came
-                                  - 6 min/max shelf list
+     Sheet menu (owner)           Web app (HtmlService): login, left menu (§6)
+     - import usage (paste)       - home: round steps, below-min list, waiting
+     - recompute par              - medicines: list + stock card, add/edit
+     - create tabs                - requisition: main storage (count sheet, count,
+     - first admin login            form) or OPD; delivery checks + expiry dates
+                                  - HOSxP import, min/max list; admin: users, log
 ```
 
 - **Container-bound script** on the existing private "IPD Stock" spreadsheet (which already holds the HOSxP export): simplest permissions, custom menu for free, no IDs in code.
-- **Web app** for the jobs done every round (count, review, output). Admin jobs (import, drug list) stay in the Sheet UI; they're done quarterly by someone comfortable with spreadsheets.
+- **Web app** for everything staff do: HOSxP import, medicines, count, review, forms, delivery checks. The Sheet menu stays for the owner (tabs, recompute, the first admin login).
 - **`Calc.js` has no Apps Script calls**, so it runs unchanged in Node for tests. It ends with
   `if (typeof module !== 'undefined') module.exports = {...}`.
 - **`Db.js` takes the spreadsheet as an argument** (default: the bound one) and uses only a dozen SpreadsheetApp calls, so tests run it against an in-memory fake (`test/fake-spreadsheet.js`).
@@ -122,20 +125,28 @@ Match key on import: `hosxp_name + strength + unit`.
 
 **UsageDaily**: `date`, `drug_id`, `qty`. Only nonzero rows are needed; missing days count as 0. Price columns are not imported. Importing a period replaces the rows dated within it (`Db.replaceUsage`), so a re-import never double counts.
 
-**Rounds**: `round_id` (the count date, e.g. `2026-11-17`; ISO week numbers no longer fit a 2-week cycle), `count_date`, `status`, `counted_by`, `submitted_at`, `reviewed_by`, `approved_at`, `note`, `received_at`, `received_by` (set when every requested line has a received quantity; cleared if one is blanked again)
+**Rounds**: `round_id` (the count date, e.g. `2026-11-17`; ISO week numbers no longer fit a 2-week cycle), `count_date`, `status`, `counted_by`, `submitted_at`, `reviewed_by`, `approved_at`, `note`, `received_at`, `received_by` (set when staff confirm the delivery check, ยืนยันรับเข้าคลัง), `req_no`, `receipt_no` (document numbers, below), `kind` (20 Nov: blank = the 2-week round; `EXTRA` = a ใบเบิกพิเศษ), `count_printed_at`, `form_printed_at` (20 Nov: last time the count sheet / the approved ใบเบิก was printed, for the round's steps; not in the change log)
+
+**ใบเบิกพิเศษ** (20 Nov, staff request): an extra request to main storage between 2-week rounds, e.g. when use jumps. It is a Rounds row with `kind = EXTRA` (`round_id` `EX-<date>`, `-2`… for more the same day) and RoundLines holding only `final_qty`: no count, no suggestion. Like an OPD request it needs no approval: `Api.createExtraRequest` saves it as `APPROVED` with its `req_no` at once (optional reason in `note`), so the delivery check (`saveReceived` / `confirmReceipt`), the ตรวจรับยา list and the stock card treat it like a round's ใบเบิก. It is kept out of everything about the 2-week round: the count page's round and round list (`Api.state`), `startRound`, `saveLines` and `approveRound`. Before its delivery is confirmed it can be cancelled (`Api.cancelExtraRequest`, status `CANCELLED`; its number is not reused). Any medicine on the main-storage or OPD list can be requested.
+
+**Document numbers** (18 Nov): a ใบเบิก gets `req_no` `บ.69/0001` when its round is approved (only if something is requested) or when an OPD request is saved; the delivery check gets `receipt_no` `ร.69/0001` when it is confirmed. One series each for main storage and OPD together, from 0001 again each Thai year (`Api.nextNo_`, run under the script lock). A ใบเบิก has one ใบรับ: what main storage or OPD didn't give is closed, not carried over; if it is still needed it goes on the next ใบเบิก. The ใบรับ is kept separate from the ใบเบิก because what arrives often differs from what was asked for. The ใบเบิก number is printed in the form's เลขที่ box.
 
 **RoundLines**: one row per round and drug (key `round_id` + `drug_id`, written with `Db.upsert` as each count autosaves); frozen at approval
 `round_id`, `drug_id`, `on_hand`, `par_used`, `suggested_qty`, `final_qty`, `boxes`, `pack_size`, `change_reason`, `flags`, `received_qty`
 (`boxes` and `pack_size`: optional whole boxes requested and units per box; when both are set, `final_qty = boxes × pack_size`. `Api.saveLines` adds these columns to an older Sheet on first save. `received_qty`: what main storage delivered, in request units, typed at the delivery check; blank = not checked. Written after approval too: approval freezes what was requested, not what arrived.)
 
 **OpdRequests**: one row per request taken to the OPD pharmacy (key `request_id` = `OPD-<date>`, `-2`, `-3`… for more the same day)
-`request_id`, `request_date`, `kind` (`MONTHLY` = the monthly list of rarely used drugs; `URGENT` = a fetch because a drug ran low, which may include main-storage drugs), `status` (`REQUESTED` → `RECEIVED` once every line has a received quantity; or `CANCELLED`), `requested_by`, `received_at`, `received_by`, `note`
+`request_id`, `request_date`, `kind` (`MONTHLY` = the monthly list of rarely used drugs; `URGENT` = a fetch because a drug ran low, which may include main-storage drugs), `status` (`REQUESTED` → `RECEIVED` when the check is confirmed; or `CANCELLED`), `requested_by`, `received_at`, `received_by`, `note`, `req_no`, `receipt_no`
 
 **OpdLines**: key `request_id` + `drug_id`: `qty` requested, `received_qty` handed over (blank = not checked)
 
 Both OPD tabs and the receiving columns are created on first use (`Db.ensureColumns` creates a missing tab), so an older Sheet needs no setup run. Urgent requests are the record of OPD trips for the trial month (PRD §8: at most 1–2 a week).
 
-**Users**: `email`, `name`, `role` (`counter` / `pharmacist` / `admin`)
+**Expiry** (18 Nov): key `ref` + `drug_id` + `exp_date`: one row per expiry date typed at a delivery check (`ref` = the round id or OPD request id, `source` `MAIN` / `OPD`), `added_at`, `added_by`, `removed_at`, `removed_by`. A line can have several dates. A row leaves the shelf when staff remove it on the stock card (the lot is used up) or correct it at the delivery check; rows are never deleted. Alerts for dates already on the shelf are a later step; the delivery check warns when a date typed is within 3 months of today (or already past), marks it red, counts those lines next to the summary and names them on the confirm click. Staff can still confirm: short-dated stock is sometimes all main storage has (owner, 20 Nov). Confirmed ใบรับ show such dates in red, measured from the day received. Dates carry no quantity per lot (decided 18 Nov): the app can't deplete stock in real time and the HOSxP rate overstates IPD use, so a per-lot quantity would be wrong within days; whether a date is still on the shelf is confirmed by staff (remove it when the lot is gone).
+
+**Users** (web app logins, `Auth.js`): key `username`; `name`, `role` (`staff` / `admin`), `active`, `pw_salt`, `pw_hash` (salted SHA-256, never the password), `created_at`, `last_login`. An older Sheet's `email` column is left alone and ignored.
+
+**ChangeLog** (append-only): `at`, `user`, `action`, `target`, `detail`. Written when a change is submitted, not on every autosave: counts and requested quantities are logged once per line when the round is approved (count, suggested, เบิกจริง, boxes, reason, under the approver's name; `Rounds.counted_by` keeps who counted), plus approvals, deliveries and expiry dates, OPD requests, medicine edits, imports, logins, user changes. Read by the admin in the app.
 
 **Import**: scratch tab. The HOSxP export is pasted here, then cleared after a successful import.
 
@@ -267,7 +278,9 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 
 ## 6. Workflows
 
-### Quarterly (admin, Sheet UI)
+### Sheet menu (owner)
+Since web app v2, staff import the HOSxP file themselves on the web page before each count (**นำเข้าข้อมูล HOSxP**, same checks as step 2). The Sheet menu path below does the same from the **Import** tab.
+
 1. Export the HOSxP daily IPD dispensing report (same columns as now: `order_date, drug_name, strength, drug_unit, total_quantity, unit_price, total_price`) and paste it into **Import**.
 2. Menu **IPD › นำเข้าข้อมูลการใช้ยา** (`Import.importUsage`):
    - Checks every row first: `order_date` as d/m/yyyy text (C.E. or B.E.) or a Sheet date, quantity a number, no date after today. Any error aborts the whole import with the row numbers, and nothing is written.
@@ -284,33 +297,33 @@ These figures are lower than §5.1 because the ~11 expensive, infrequent drugs (
 - `min_par` or `par_override` set → stocked.
 - `critical` drugs are always stocked. Expensive, infrequent drugs are stocked only once they have a `min_par` or `par_override` (or `source = MAIN`).
 
-### Web app (v1, 16 Nov 2026)
+### Web app (v2, 18 Nov 2026: layout chosen by the owner)
 
-One page (`ui/App.html`) with six tabs:
+Layout: a home dashboard and one medicine list (common in inventory apps such as Sortly and BoxHero), with a stock card per medicine (the บัตรคุมยา). Staff sign in first (§7). The left menu (20 Nov) puts the main job first, in the order of the work: หน้าหลัก, นำเข้าข้อมูล HOSxP, เบิกยา, ตรวจรับยา. Under a ข้อมูลยา heading come the pages used now and then: รายการยา and ป้ายสูงสุด/ต่ำสุด. The admin pages come last. The screens:
 
-1. **นำเข้าข้อมูลการใช้ยา**: drag a HOSxP export onto the drop box. The browser reads it with SheetJS (xlsx/xls/csv; CSV decoded as UTF-8, else Windows-874 Thai), finds the header row by column name, turns Excel date serials into d/m/yyyy, drops zero rows, shows a preview, and sends the rows to `Api.importFile` → `Import.importRows` (same checks and result as the Sheet menu).
-2. **นับยาและคำนวณยอดเบิก**: one open round at a time (`round_id` = count date). Stocked drugs grouped by location, each showing max / min in request units; a line under min turns red with "ต่ำกว่า min — ขอจาก OPD วันนี้" and is counted in the header. Typing on-hand updates the suggested quantity at once, and edits are saved in batches every ~1 s (`Api.saveLines`, which recomputes `par_used`, `suggested_qty` and flags on the server). `เบิกจริง` overrides the suggestion and asks for a reason. Optional `กล่อง` × `ต่อกล่อง` (boxes × units per box, the two inputs after `เบิกจริง`) fills `เบิกจริง`; units per box is prefilled with the last value typed for the drug, and a `เบิกจริง` typed by hand that no longer matches clears the boxes. **อนุมัติรอบนี้** (two clicks) freezes the round. Earlier rounds can be reopened read-only from a picker.
-3. **ใบเบิก (คลัง)**: the paper form's layout, 19 lines per A4 page, lines with quantity > 0 in counting order. Header fields (เล่มที่, เลขที่, จาก, ถึง, วันที่) are typed above the preview. Lines requested by box show `boxes x pack_size` under จำนวนเบิกใหม่ and the box count under จ่ายหรือรับคืน. Print, CSV download (UTF-8 with BOM, opens in Excel), or copy as tab-separated text.
-4. **ตรวจรับจากคลัง** (18 Nov): the requisition's lines (quantity > 0) with requested vs received. Staff type what arrived or tap ครบ per line, or fill every blank line with the requested quantity and correct the short ones; each line shows ครบ / ขาด n / เกิน n while typing. **บันทึกการตรวจรับ** saves (`Api.saveReceived`); the round shows ตรวจรับครบแล้ว once every line has a value. Works on approved rounds.
-5. **ขอ/รับยาจาก OPD** (18 Nov): OPD-source drugs used in the history window, suggested quantity = average use over `opd_cycle_days` (a month). Ticking แสดงยาที่เบิกคลังด้วย adds main-storage drugs (no suggestion; staff type the quantity) and switches the type to ด่วน, for a drug below its min. **บันทึกและพิมพ์** saves the request (`Api.createOpdRequest`) and prints it with a จ่ายจริง column for OPD. Open requests are listed under **รอรับจาก OPD** with the same received-quantity table (`Api.saveOpdReceived`), a reprint button and a two-click cancel. A history card lists the last 10 closed requests (short lines named) and counts urgent requests in the last 7 days. Unsaved ticks stay in the browser only.
-6. **ป้ายสูงสุด/ต่ำสุด**: printable A4 list of every stocked drug by location with max and min in request units (rounded up), plus CSV. Reprint after each import, since both numbers change.
+1. **หน้าหลัก**: the 2-week round as seven steps (HOSxP import, done when the data reaches within 7 days of the count date → print count sheet → type counts → เบิกจริง / boxes → approve → print form → delivery check with expiry dates), with what is done. Since 20 Nov each step is a button that goes where the step is done (import page; print the count sheet; the count list; the approve button; the ใบเบิก; the delivery check of this round's ใบเบิก). Done steps are green with ✓, and the next step to do (the first not done after the last done one) is outlined and labelled ถัดไป. Done rules: count sheet = printed for this round (`Rounds.count_printed_at`, via `Api.markPrinted`), or counting started; counts = every main-storage drug counted; steps 2–4 also once approved; ใบเบิก = printed after approval (`Rounds.form_printed_at`) or received. The same steps sit above the count list; tiles for drugs below min at the latest count, deliveries waiting from main storage and from OPD, and the number of medicines; the below-min list with **ขอด่วนจาก OPD** per drug (opens the OPD request with that drug ticked, type ด่วน).
+2. **รายการยา**: one searchable list (name, HOSxP name, strength, item code) with filters (main storage, OPD, critical, below min, not requested), latest count and its date, max / min and a status. Clicking a medicine opens its **stock card**: latest count, max / min, HOSxP average use (labelled an estimate: new admissions and weekend patients are dispensed from OPD stock), units per box, the expiry dates on the shelf (each removable), and the history (each round's count, request and delivery; each ใบเบิกพิเศษ; each OPD request and what came) from `Api.drugCard`. The open card is fetched again whenever รายการยา is shown, so deliveries checked elsewhere appear (before 20 Nov it kept the copy loaded when the medicine was opened). **แก้ไขข้อมูลยา** / **+ เพิ่มยา** (`Api.saveDrug`): name and unit used on the form, HOSxP units per request unit, item code, units per box, source (automatic / main storage / OPD / none), critical, and max / min set by hand (typed in request units, stored as `par_override` / `min_override` in HOSxP units). A new medicine needs the HOSxP name, strength and unit exactly as HOSxP writes them, so later imports match it; those three can't be changed afterwards. Saving recomputes the stock rules.
+3. **เบิกยา**, one page with a switch:
+   - **เบิกจากคลัง (ทุก 2 สัปดาห์)**: the round's steps, then two sub-views. *นับยาและยอดเบิก*: **พิมพ์ใบนับยา** prints the count sheet (main-storage drugs with max / min, then OPD drugs kept on the IPD shelf with a month's average use, and an empty column for the count); staff count on paper, then type the counts here. Main-storage lines show the suggested quantity, `เบิกจริง`, optional `กล่อง` × `ต่อกล่อง`, flags, autosave (`Api.saveLines`), and **อนุมัติรอบนี้** (two clicks). OPD drugs get a count box only (saved as a round line with no request). *ใบเบิก*: the paper form, 19 lines per A4 page; boxed lines show `boxes x pack_size` and the box count under จ่ายหรือรับคืน; print, CSV or copy.
+   - **เบิกจาก OPD**: OPD drugs with the latest count of this cycle, a month's average use and the suggested quantity = a month's average use − the count (when counted within `cycle_days`), else a month's use. Ticking แสดงยาที่เบิกคลังด้วย adds main-storage drugs and switches the type to ด่วน. **บันทึกและพิมพ์** (`Api.createOpdRequest`) prints it with a จ่ายจริง column. History of requests with reprint, and urgent requests in the last 7 days (PRD §8).
+   - **ใบเบิกพิเศษ (จากคลัง)** (20 Nov): written line by line. A **เพิ่มยา** search box suggests medicines on the main-storage or OPD list as staff type (↑/↓, Enter or click adds one; medicines already on the list are left out); the cursor goes to the new line's quantity, and Enter there goes back to the search box for the next medicine. Lines can be removed (×); the list is kept in the browser until saved. Optional reason. **บันทึกและพิมพ์ใบเบิก** needs two clicks: the first checks that every line has a quantity (blank ones are marked red) and turns the button red to confirm; the second saves (`Api.createExtraRequest`, ใบเบิก number as for a round or an OPD request) and prints the same paper form as the round (blank คงเหลือ column, "(ใบเบิกพิเศษ)" after the date). Below: recent ใบเบิกพิเศษ with their result and reprint.
+4. **ตรวจรับยา**: lists only approved ใบเบิก still waiting for their delivery (main storage and OPD, with their numbers, oldest first); staff click the one that matches what arrived. Per line: received quantity (or ครบ, or fill all blanks; 0 = nothing came), ครบ / ขาด / เกิน, and **any number of expiry dates**. **บันทึกร่าง** saves a draft (`Api.saveReceived` / `Api.saveOpdReceived`; a date taken off a line is removed). **ยืนยันรับเข้าคลัง** (two clicks; `Api.confirmReceipt` / `Api.confirmOpdReceipt`) needs every line filled and an expiry date on every line that received something (an empty date box shows by default; missing ones are marked red), gives the ใบรับ number and locks the quantities (expiry dates can still be fixed on the server). Below: the last 15 confirmed ใบรับ, each opening a read-only view. A ใบเบิกพิเศษ shows as from คลังยา (ใบเบิกพิเศษ), with reprint and cancel like an OPD request. Expiry dates within 3 months are flagged (above, ใบเบิกพิเศษ / expiry).
+5. **นำเข้าข้อมูล HOSxP**: drag a HOSxP export (xlsx/xls/csv, read in the browser with SheetJS), preview, import (`Api.importFile` → `Import.importRows`). Staff do this themselves before counting.
+6. **ป้ายสูงสุด/ต่ำสุด**: printable list of stocked drugs with max and min in request units, plus CSV.
+7. Admin only: **ผู้ใช้งาน** (add staff, set name / role / password, deactivate instead of delete; the last active admin can't be removed) and **ประวัติการแก้ไข** (the last 500 ChangeLog rows, searchable).
 
-The round review step (status `REVIEW`) is folded into the same screen for now: the pharmacist edits `เบิกจริง` and approves.
+Everything printed goes through one hidden `#print-area`, so only that page reaches the printer. The round review step (status `REVIEW`) is folded into the count screen: the pharmacist edits `เบิกจริง` and approves. Real use is not worked out from counts: patients' doses also come from OPD stock (new admissions, weekends), so max / min stay based on the HOSxP rate.
 
-Deployment: `clasp push`, then `clasp update-deployment <deploymentId>` to publish to the same URL (`clasp create-deployment` the first time). The manifest runs the app as the owner with access limited to the owner (`MYSELF`); widen `access` when staff start using it (§7).
+Deployment: `clasp push`, then `clasp update-deployment <deploymentId>` to publish to the same URL (`clasp create-deployment` the first time). `clasp push` alone updates the test deployment (`@HEAD`, the `/dev` URL, editors only), so a change can be tried before staff see it. The manifest runs the app as the owner and, since 19 Nov, lets anyone with the link open it (`ANYONE_ANONYMOUS`); the app's own login guards every call (§7).
 
-### Round every 2 weeks (web app, original plan)
-1. **Count** (technician, phone). Opens the current round, created automatically for the cycle. Only `MAIN` drugs are counted. Drugs are grouped by location in `shelf_order`, with name, strength, unit and a critical badge, and one number input in the drug's request unit (tablets, ampoules, or bottles for per-ml liquids; decimals allowed for an opened bottle). Each row autosaves, so a half-finished count survives interruptions. A progress bar shows "counted 87/210". **ส่งให้เภสัชตรวจ** sets status `REVIEW`.
-2. **Review** (pharmacist). Flagged lines first, rest collapsed. `final_qty` is editable and requires a short reason when changed. **อนุมัติ** freezes the round (`APPROVED`).
-3. **Output: main-storage form.** Lines with `final_qty > 0` in the column order of ใบเบิกหรือใบส่งคืน: ลำดับ / หมายเลขพัสดุ / รายการ / หน่วยนับ / คงเหลือจากครั้งที่แล้ว (on-hand from the count) / จำนวนเบิกใหม่. จ่ายหรือรับคืน and the price columns are left for main storage. Printable A4 plus **คัดลอก** (tab-separated).
-4. **Output: OPD list** (monthly). `OPD` drugs with the suggested quantity for one OPD cycle (`opd_cycle_days`); staff tick the lines they want and print or copy: ลำดับ / รายการ / จำนวน / หน่วย / หมายเหตุ = IPD.
-
-Status flow: `COUNTING → REVIEW → APPROVED`. The pharmacist can send a round back to `COUNTING`. Approved rounds are read-only.
+Round status: `COUNTING → APPROVED` (the review step is folded into the count screen). Approved rounds are read-only.
 
 ## 7. Access and privacy
 
-- **Recommended:** web app deployed as *Execute as: user accessing*, and the Sheet shared (editor) with the 2–4 people in **Users**. This gives real identities for `counted_by` / `reviewed_by`. It needs every user to have a Google account (§9 Q1).
-- Fallback if staff have no Google accounts: *Execute as: me*, with each user picking their name from a list. This is weaker: anyone holding the URL could submit.
+- **The app's own logins** (18 Nov, `Auth.js`). The web app runs as the owner (*Execute as: me*), so the Sheet stays private and staff need no Google account. Each person signs in with a username and password; the Users tab keeps only a salted hash. A login returns a random session token kept in the browser and sent with every call; sessions live in the script cache for 6 hours after the last call. Every `api*` call checks the token and the user's Users row (a deactivated user is out at once). Five wrong passwords in a row pause that username for 10 minutes. **ออกจากระบบ** ends the session on a shared PC.
+- **Roles:** `staff` do all the work, including the HOSxP import and adding / editing medicines. `admin` (the owner) can also manage users and read the change log. The owner creates the first admin from the Sheet menu **IPD › สร้างบัญชีผู้ดูแลระบบ / ตั้งรหัสใหม่** (also the way back in if the admin password is lost).
+- **Who changed what:** names (not emails) go into `counted_by`, `reviewed_by`, `received_by`, `requested_by`, Expiry and every ChangeLog row.
+- The web app's `access` is *Anyone* (`ANYONE_ANONYMOUS`) since 19 Nov, so staff need no Google account; the login page is the only thing a stranger with the link sees.
 - The HOSxP export has no patient columns. If a future export adds HN/AN or names, the importer ignores every column except the seven above.
 - Git holds code and docs only. `.clasp.json` (script ID) is gitignored. No usage data is committed.
 
@@ -319,9 +332,9 @@ Status flow: `COUNTING → REVIEW → APPROVED`. The pharmacist can send a round
 ```
 src/                 Apps Script project root (clasp rootDir)
   appsscript.json          time zone Asia/Bangkok, V8
-  Code.js  Calc.js  Schema.js  Db.js  Import.js  Api.js
+  Code.js  Calc.js  Schema.js  Db.js  Import.js  Auth.js  Api.js
   ui/ App.html  Styles.html  Client.html
-test/                node --test: calc, db, import, api (+ fake-spreadsheet.js)
+test/                node --test: calc, db, import, auth, api (+ fake-spreadsheet.js)
 tools/backtest.js    replays a HOSxP export through Calc.js (aggregates only)
 docs/                PRD, DESIGN
 ```
@@ -351,7 +364,7 @@ Resolved:
 - Issue sizes: lidocaine viscous comes from main storage in 100 ml bottles (HOSxP counts 15 ml bottles → `request_factor` 100/15); S.M.W is requested by the 3.750 L gallon (HOSxP counts 120 ml bottles → `request_factor` 31.25). `Syrup (คิดเป็น ml)`: 450 ml bottle.
 
 Open:
-1. **Accounts and devices.** Do the technician and pharmacist have Google accounts, and will they count on a phone? (Decides §7.)
+1. ~~Accounts and devices~~ resolved (18 Nov): the app's own logins, so no Google accounts are needed (§7); staff count on a printed count sheet and type the counts in at a PC.
 2. ~~Lead time~~ resolved above.
 3. ~~Delivery delay~~ resolved above (5 days).
 4. ~~Bottle sizes~~ resolved above. Adrenaline 1 mg/ml: 1 ml = 1 ampoule.
