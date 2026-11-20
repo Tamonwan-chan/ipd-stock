@@ -16,6 +16,7 @@ Drug stock and requisition tool for a hospital inpatient pharmacy (IPD). IPD has
 - Deployed with `clasp push` to the Apps Script project bound to the private "IPD Stock" Sheet. `.clasp.json` (script ID) is local only; on another PC, recreate it from the script ID in the Apps Script editor (Project Settings), with `"rootDir": "src"`.
 - Open decisions are tracked as GitHub issues (#1–#4) and in DESIGN §9.
 - Web app v2 (18 Nov 2026, branch `ui-redesign`): own logins (`src/Auth.js`, Users tab, roles staff/admin, ChangeLog of every change), left-menu layout (home, medicine list + stock card with add/edit, เบิกยา main storage or OPD with a printed count sheet, delivery checks with several expiry dates per line, admin users + change log). Pushed to the test deployment (@HEAD /dev URL); live deployment still v12. Expiry alerts come later.
+- 20 Nov 2026, after the first teaching round with staff (not UAT yet): menu in work order, ใบเบิกพิเศษ (`Rounds.kind = EXTRA`, `Api.createExtraRequest` / `cancelExtraRequest`), warning at the delivery check for expiry within 3 months, stock card reloads when รายการยา is shown again (the OPD delivery "missing" from the card was a stale card), icon credit moved into the About dialog.
 - Web app v1 deployed (owner-only access). The browser code in `src/ui/Client.html` has no automated tests beyond a parse check; try changes in the deployed page.
 - Next: feedback from IPD staff on the web app; widen web app access (DESIGN §7). See DESIGN §9 for questions still open with IPD staff.
 

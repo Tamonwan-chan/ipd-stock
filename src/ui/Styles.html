@@ -103,6 +103,7 @@
   .login-msg { color: var(--danger); min-height: 1.2em; font-size: 14px; }
   .field { display: grid; gap: 4px; font-size: 14px; font-weight: 600; }
   .field input, .field select { font-weight: 400; width: 100%; }
+  .field.grow { flex: 1 1 280px; }
   .field input[readonly] { background: var(--bg); color: var(--muted); }
   .card {
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
@@ -132,7 +133,6 @@
   .nav .ic { width: 20px; height: 20px; margin-right: 0; opacity: .85; }
   .nav button[aria-current="page"] .ic { opacity: 1; }
   .link .ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 3px; }
-  .credit { font-size: 11px; color: var(--muted); }
   @media print { .ic { display: none; } }
   input[type=number], input[type=text], input[type=search], input[type=password], input[type=date], select {
     border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface);
@@ -323,6 +323,11 @@
   .exp-in input { width: 150px; }
   td.exp.need input[type=date] { border-color: var(--danger); background: var(--danger-soft); }
   .danger-text { color: var(--danger); font-weight: 600; }
+  /* expiry within 3 months (or already expired) at the delivery check */
+  .exp-in { flex-wrap: wrap; }
+  .exp-in.soon input[type=date] { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+  .exp-warn { color: var(--danger); font-size: 12px; font-weight: 600; flex-basis: 100%; }
+  .exp-warn:empty { display: none; }
   .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 0 4px; }
   .x:hover { color: var(--danger); }
 

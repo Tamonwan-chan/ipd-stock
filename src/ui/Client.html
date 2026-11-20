@@ -18,7 +18,7 @@
     user: null,           // {username, name, role}
     state: null,          // from apiState
     view: null,
-    reqMode: 'main',      // เบิกยา: 'main' (main storage) or 'opd'
+    reqMode: 'main',      // เบิกยา: 'main' (main storage), 'opd', or 'extra' (ใบเบิกพิเศษ from main storage)
     reqSub: 'count',      // main storage: 'count' or 'form'
     parsed: null,         // file read in the import view
     pending: {},          // drug_id -> unsaved count edit
@@ -31,6 +31,8 @@
     opdQty: {},           // drug_id -> qty typed
     opdFilter: '',
     opdAll: false,        // OPD list also shows main-storage drugs (urgent fetch)
+    exQty: {},            // ใบเบิกพิเศษ: drug_id -> qty typed
+    exFilter: '',
     recvQty: {},          // doc key ('MAIN:'+round_id / 'OPD:'+request_id) -> {drug_id -> received qty typed, not saved}
     recvSel: null,        // doc key of the ใบเบิก being checked
     recvExp: {},          // 'main' or request_id -> {drug_id -> [expiry dates]} not yet saved
@@ -57,6 +59,7 @@
     EDITED: ['แก้จำนวน', '']
   };
   var KIND_TEXT = { MONTHLY: 'ประจำเดือน', URGENT: 'ด่วน (ยาใกล้หมด)' };
+  var EXP_WARN_MONTHS = 3; // delivery check: warn when what came expires within this many months
   var SOURCE_TEXT = { '': 'อัตโนมัติ (ตามความถี่การใช้)', MAIN: 'เบิกจากคลัง', OPD: 'ขอจาก OPD', NONE: 'ไม่ต้องเบิก' };
 
   // ---------------------------------------------------------------- helpers
@@ -64,7 +67,7 @@
   function each(sel, root, fn) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
 
   // Icons: the "Guidance" set by Streamline (https://www.streamlinehq.com), CC BY 4.0, taken via the
-  // Iconify API. Credited in the menu and README. Drawn on 24x24 with a 1px stroke; .ic in Styles
+  // Iconify API. Credited in the About dialog and README. Drawn on 24x24 with a 1px stroke; .ic in Styles
   // thickens the stroke so they read at menu size. Used only on main menus and buttons whose icon
   // says what they do (print, expiry date, password, sign out).
   var ICONS = {
@@ -110,6 +113,15 @@
   function thDateTime(s) {
     var m = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/.exec(s || '');
     return m ? thDate(m[1]) + ' ' + m[2] : (s || '');
+  }
+  // 'YYYY-MM-DD' plus n calendar months (the 31st becomes the month's last day).
+  function isoAddMonths(iso, n) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    if (!m) return '';
+    var y = +m[1], mo = +m[2] - 1 + n, d = +m[3];
+    y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
+    var last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+    return y + '-' + ('0' + (mo + 1)).slice(-2) + '-' + ('0' + Math.min(d, last)).slice(-2);
   }
   function isoAddDays(iso, n) {
     var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
@@ -188,8 +200,8 @@
     var label = btn.textContent, on = false, t;
     btn.onclick = function () {
       if (!on) {
-        on = true; btn.classList.add('armed'); btn.textContent = confirmText;
-        t = setTimeout(function () { on = false; btn.classList.remove('armed'); btn.textContent = label; }, 4000);
+        on = true; btn.classList.add('armed'); btn.textContent = typeof confirmText === 'function' ? confirmText() : confirmText;
+        t = setTimeout(function () { on = false; btn.classList.remove('armed'); btn.textContent = label; }, 5000);
         return;
       }
       clearTimeout(t);
@@ -364,6 +376,7 @@
     store('view', name);
     each('#nav [data-view]', null, function (b) { b.setAttribute('aria-current', b.getAttribute('data-view') === name ? 'page' : 'false'); });
     each('.view', null, function (s) { s.hidden = s.id !== 'view-' + name; });
+    if (name === 'drugs' && S.drugSel && !S.editing) refreshCard();
     if (name === 'request') renderRequest();
     if (name === 'receive') renderReceive();
     if (name === 'minmax') renderMinMax();
@@ -504,6 +517,13 @@
       }).join('') || '<tr><td colspan="4" class="muted">ไม่พบยาที่ค้นหา</td></tr>') + '</tbody></table>' +
       '<p class="muted small">' + rows.length + ' รายการ</p>';
   }
+  // Reload the open stock card (deliveries, counts and expiry dates may have changed elsewhere).
+  function refreshCard() {
+    var id = S.drugSel;
+    api('apiDrugCard', id).then(function (c) {
+      if (S.drugSel === id && !S.editing) { S.card = c; renderCard(); }
+    }).catch(function () {});
+  }
   function openDrug(id) {
     S.drugSel = id; S.editing = null; S.card = null;
     renderDrugTable(); renderCard();
@@ -535,13 +555,14 @@
       (d.pack_size ? kvItem('ต่อกล่อง', fmt(d.pack_size), d.unit) : '') +
       '</div>';
     var lots = c.expiry.length ? '<ul class="lots">' + c.expiry.map(function (x) {
-      return '<li><b>' + thDate(x.exp_date) + '</b> <span class="muted small">' + (x.source === 'OPD' ? 'จาก OPD ' : 'จากคลัง รอบ ') + esc(x.ref.replace(/^OPD-/, '')) +
+      return '<li><b>' + thDate(x.exp_date) + '</b> <span class="muted small">' + (x.source === 'OPD' ? 'จาก OPD ' : /^EX-/.test(x.ref) ? 'จากคลัง ใบเบิกพิเศษ ' : 'จากคลัง รอบ ') +
+        esc(x.ref.replace(/^(OPD|EX)-/, '')) +
         '</span><button class="btn small" type="button" data-rmexp="' + esc(x.ref) + '|' + esc(x.exp_date) + '">ลบ</button></li>';
     }).join('') + '</ul>' : '<p class="muted small">ยังไม่มี (ใส่ได้ตอนตรวจรับยา)</p>';
     var hist = c.history.length ? '<div class="table-wrap"><table class="plain"><thead><tr><th>วันที่</th><th>รายการ</th>' +
       '<th class="num">คงเหลือ (นับ)</th><th class="num">ขอ/เบิก</th><th class="num">ได้รับ</th></tr></thead><tbody>' +
       c.history.map(function (h) {
-        var what = h.type === 'MAIN' ? 'รอบเบิกคลัง' + (h.status === 'APPROVED' ? '' : ' (กำลังนับ)')
+        var what = h.type === 'MAIN' ? (h.kind === 'EXTRA' ? 'ใบเบิกพิเศษ (คลัง)' : 'รอบเบิกคลัง' + (h.status === 'APPROVED' ? '' : ' (กำลังนับ)'))
           : 'ขอจาก OPD ' + (h.kind === 'URGENT' ? '(ด่วน)' : '(ประจำเดือน)');
         var req = num(h.requested);
         var reqText = h.type === 'MAIN' && num(h.boxes) !== null && num(h.pack_size) !== null
@@ -636,6 +657,7 @@
     each('#view-request > .seg [data-mode]', null, function (b) { b.setAttribute('aria-selected', b.getAttribute('data-mode') === S.reqMode ? 'true' : 'false'); });
     $('req-main').hidden = S.reqMode !== 'main';
     $('req-opd').hidden = S.reqMode !== 'opd';
+    $('req-extra').hidden = S.reqMode !== 'extra';
     each('#req-main .seg [data-sub]', null, function (b) { b.setAttribute('aria-selected', b.getAttribute('data-sub') === S.reqSub ? 'true' : 'false'); });
     $('sub-count').hidden = S.reqSub !== 'count';
     $('sub-form').hidden = S.reqSub !== 'form';
@@ -645,6 +667,7 @@
       if (e.target.closest('[data-go="import"]')) showView('import');
     };
     if (S.reqMode === 'main') { renderCount(); renderForm(); }
+    else if (S.reqMode === 'extra') renderExtra();
     else renderOpd();
   }
 
@@ -974,6 +997,12 @@
     var pages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
     $('form-summary').textContent = lines.length + ' รายการ · ' + pages + ' แผ่น' +
       (S.state.round.status === 'APPROVED' ? '' : ' · รอบนี้ยังไม่อนุมัติ');
+    box.innerHTML = formPagesHtml(lines, { book: S.head.book, no: formNo(), from: S.head.from, to: S.head.to, date: S.head.date });
+  }
+
+  // The paper ใบเบิกหรือใบส่งคืน. lines: formLines() shape; head: {book, no, from, to, date}.
+  function formPagesHtml(lines, head) {
+    var pages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
     var html = '';
     for (var p = 0; p < pages; p++) {
       var slice = lines.slice(p * LINES_PER_PAGE, (p + 1) * LINES_PER_PAGE);
@@ -987,11 +1016,11 @@
           : '<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>';
       }
       html += '<div class="form-page">' +
-        '<div class="fp-title"><div>เล่มที่ <span class="fill">' + esc(S.head.book) + '</span></div><h1>ใบเบิกหรือใบส่งคืน</h1>' +
-        '<div class="r">เลขที่ <span class="fill">' + esc(formNo()) + '</span></div></div>' +
-        '<table class="fp-head"><tr><td style="width:55%">แผ่นที่ ' + (p + 1) + ' &nbsp; จำนวน ' + pages + ' แผ่น</td><td>' + esc(S.head.date) + '</td></tr>' +
-        '<tr><td>จาก ' + esc(S.head.from) + '</td><td rowspan="3"></td></tr>' +
-        '<tr><td>ถึง ' + esc(S.head.to) + '</td></tr>' +
+        '<div class="fp-title"><div>เล่มที่ <span class="fill">' + esc(head.book) + '</span></div><h1>ใบเบิกหรือใบส่งคืน</h1>' +
+        '<div class="r">เลขที่ <span class="fill">' + esc(head.no) + '</span></div></div>' +
+        '<table class="fp-head"><tr><td style="width:55%">แผ่นที่ ' + (p + 1) + ' &nbsp; จำนวน ' + pages + ' แผ่น</td><td>' + esc(head.date) + '</td></tr>' +
+        '<tr><td>จาก ' + esc(head.from) + '</td><td rowspan="3"></td></tr>' +
+        '<tr><td>ถึง ' + esc(head.to) + '</td></tr>' +
         '<tr><td>ประเภทพัสดุและ/หรือครุภัณฑ์ที่เกี่ยวข้อง: ยา</td></tr></table>' +
         '<table class="fp-lines"><thead><tr>' +
         '<th style="width:7%">ลำดับ</th><th style="width:9%">หมายเลขพัสดุ</th><th>รายการ</th><th style="width:8%">หน่วยนับ</th>' +
@@ -1006,7 +1035,7 @@
         '<tr><td>ได้รับของตามจำนวนและรายการที่จ่ายเรียบร้อยแล้ว<br>ผู้รับพัสดุ (..............................................)</td><td>ผู้จ่าย<br>วันที่</td></tr>' +
         '</table></div>';
     }
-    box.innerHTML = html;
+    return html;
   }
 
   function formRows() {
@@ -1042,13 +1071,28 @@
     if (typed) return typed;
     return S.state.expiry.filter(function (x) { return x.ref === ref && x.drug_id === key; }).map(function (x) { return x.exp_date; });
   }
+  // Short-dated delivery: '' (fine or no date), 'soon' (within EXP_WARN_MONTHS) or 'past' (already expired).
+  function expSoon(iso) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return '';
+    if (iso < S.state.today) return 'past';
+    return iso < isoAddMonths(S.state.today, EXP_WARN_MONTHS) ? 'soon' : '';
+  }
+  function expWarnText(w) { return w === 'past' ? 'หมดอายุแล้ว' : w === 'soon' ? 'หมดอายุภายใน ' + EXP_WARN_MONTHS + ' เดือน' : ''; }
   function expCellHtml(prefix, ref, key) {
     var dates = expOf(prefix, ref, key);
     if (!dates.length) dates = ['']; // one empty date box by default: what came needs its expiry date
     return dates.map(function (dt, i) {
-      return '<span class="exp-in"><input type="date" value="' + esc(dt) + '" data-ek="' + esc(key) + '" data-ei="' + i + '" aria-label="วันหมดอายุ">' +
-        '<button type="button" class="x" data-erm="' + esc(key) + '" data-ei="' + i + '" aria-label="ลบวันหมดอายุนี้">×</button></span>';
+      var w = expSoon(dt);
+      return '<span class="exp-in' + (w ? ' soon' : '') + '"><input type="date" value="' + esc(dt) + '" data-ek="' + esc(key) + '" data-ei="' + i + '" aria-label="วันหมดอายุ">' +
+        '<button type="button" class="x" data-erm="' + esc(key) + '" data-ei="' + i + '" aria-label="ลบวันหมดอายุนี้">×</button>' +
+        '<span class="exp-warn" role="status">' + esc(expWarnText(w)) + '</span></span>';
     }).join('') + '<button type="button" class="btn small" data-eadd="' + esc(key) + '">' + icon('calendar') + '+ วันหมดอายุ</button>';
+  }
+  // Lines of a delivery check with a short-dated expiry typed or saved.
+  function soonLines(prefix, ref, rows) {
+    return rows.filter(function (r) {
+      return num(r.val()) > 0 && expOf(prefix, ref, r.key).some(function (d) { return expSoon(d); });
+    });
   }
   function recvTable(prefix, ref, rows) {
     return '<div class="table-wrap"><table class="plain recv"><thead><tr><th>#</th><th>รายการ</th><th class="num">ขอ</th>' +
@@ -1090,6 +1134,9 @@
       var t = e.target;
       if (!t.hasAttribute('data-ei') || t.tagName !== 'INPUT') return;
       typedExp(t.getAttribute('data-ek'))[+t.getAttribute('data-ei')] = t.value;
+      var w = expSoon(t.value), wrap = t.closest('.exp-in');
+      wrap.classList.toggle('soon', !!w);
+      wrap.querySelector('.exp-warn').textContent = expWarnText(w);
       after();
     };
     box.onclick = function (e) {
@@ -1139,7 +1186,7 @@
   function recvDocs() {
     var st = S.state;
     var main = (st.main_docs || []).map(function (d) {
-      return { key: 'MAIN:' + d.round_id, source: 'MAIN', ref: d.round_id, req_no: d.req_no, date: d.count_date, kind: '',
+      return { key: 'MAIN:' + d.round_id, source: 'MAIN', ref: d.round_id, req_no: d.req_no, date: d.count_date, kind: d.kind || '',
         open: !d.received_at, receipt_no: d.receipt_no, received_at: d.received_at, received_by: d.received_by,
         by: d.reviewed_by, lines: d.lines };
     });
@@ -1151,7 +1198,10 @@
     return main.concat(opd);
   }
   function docTitle(doc) { return doc.req_no ? 'ใบเบิก ' + doc.req_no : (doc.source === 'MAIN' ? 'ใบเบิกรอบ ' : 'ขอ OPD ') + thDate(doc.date); }
-  function docFrom(doc) { return doc.source === 'MAIN' ? 'คลังยา' : 'OPD' + (doc.kind === 'URGENT' ? ' (ด่วน)' : ''); }
+  function docFrom(doc) {
+    if (doc.source === 'MAIN') return doc.kind === 'EXTRA' ? 'คลังยา (ใบเบิกพิเศษ)' : 'คลังยา';
+    return 'OPD' + (doc.kind === 'URGENT' ? ' (ด่วน)' : '');
+  }
   function recvTyped(doc) { return S.recvQty[doc.key] || {}; }
   function recvRows(doc) {
     var dm = drugMap();
@@ -1229,7 +1279,10 @@
           var v = r.val(), dates = S.state.expiry.filter(function (x) { return x.ref === doc.ref && x.drug_id === r.key; });
           return '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + ' <span class="muted small">' + esc(r.unit) + '</span></td>' +
             '<td class="num">' + esc(r.reqText) + '</td><td class="num">' + fmt(v) + '</td><td>' + recvBadge(r.req, v) + '</td>' +
-            '<td>' + dates.map(function (x) { return thDate(x.exp_date); }).join(', ') + '</td></tr>';
+            '<td>' + dates.map(function (x) {
+              var w = doc.received_at && x.exp_date < isoAddMonths(doc.received_at, EXP_WARN_MONTHS);
+              return w ? '<span class="danger-text" title="หมดอายุภายใน ' + EXP_WARN_MONTHS + ' เดือนนับจากวันรับ">' + thDate(x.exp_date) + '</span>' : thDate(x.exp_date);
+            }).join(', ') + '</td></tr>';
         }).join('') + '</tbody></table></div></div>';
       return;
     }
@@ -1243,7 +1296,8 @@
       '<button class="btn primary" type="button" id="recv-confirm">ยืนยันรับเข้าคลัง</button><span class="spacer"></span>' +
       '<span id="recv-sum" class="muted small"></span></div>' +
       '<div id="recv-table">' + recvTable(doc.key, doc.ref, rows) + '</div>' +
-      (doc.source === 'OPD' ? '<div class="row"><button class="btn" type="button" id="recv-oprint">' + icon('printer') + 'พิมพ์ใบขออีกครั้ง</button>' +
+      (doc.source === 'OPD' || doc.kind === 'EXTRA' ? '<div class="row"><button class="btn" type="button" id="recv-oprint">' + icon('printer') +
+        (doc.source === 'OPD' ? 'พิมพ์ใบขออีกครั้ง' : 'พิมพ์ใบเบิกอีกครั้ง') + '</button>' +
         '<button class="btn danger" type="button" id="recv-ocancel">ยกเลิกใบเบิกนี้</button></div>' : '') +
       '</div>';
     function sum() {
@@ -1254,17 +1308,26 @@
         var cell = $('recv-table').querySelector('[data-ecell="' + r.key + '"]');
         if (cell) cell.classList.toggle('need', need);
       });
+      var soon = soonLines(doc.key, doc.ref, rows).length;
       $('recv-sum').innerHTML = esc(recvSummaryText(recvCounts(rows))) +
         (noExp ? ' · <span class="danger-text">ยังไม่ใส่วันหมดอายุ ' + noExp + '</span>' : '') +
+        (soon ? ' · <span class="danger-text">หมดอายุภายใน ' + EXP_WARN_MONTHS + ' เดือน ' + soon + '</span>' : '') +
         (n ? ' · ยังไม่บันทึก ' + n + ' รายการ' : '');
     }
     var fill = wireRecv($('recv-table'), doc.key, doc.ref, rows, function (k, v) { (S.recvQty[doc.key] = S.recvQty[doc.key] || {})[k] = v; }, sum);
     $('recv-fill').onclick = fill;
     $('recv-save').onclick = function () { saveRecv(doc, this).catch(function () {}); };
-    armed($('recv-confirm'), 'กดอีกครั้งเพื่อยืนยัน (แก้จำนวนไม่ได้อีก)', function (btn) { confirmRecv(doc, btn); });
+    armed($('recv-confirm'), function () {
+      var soon = soonLines(doc.key, doc.ref, rows);
+      return soon.length ? 'มียาหมดอายุภายใน ' + EXP_WARN_MONTHS + ' เดือน ' + soon.length + ' รายการ กดอีกครั้งเพื่อรับเข้าคลัง'
+        : 'กดอีกครั้งเพื่อยืนยัน (แก้จำนวนไม่ได้อีก)';
+    }, function (btn) { confirmRecv(doc, btn); });
     if (doc.source === 'OPD') {
       $('recv-oprint').onclick = function () { printOpd(doc.ref); };
       armed($('recv-ocancel'), 'กดอีกครั้งเพื่อยกเลิก', function (btn) { cancelOpd(doc.ref, btn); });
+    } else if (doc.kind === 'EXTRA') {
+      $('recv-oprint').onclick = function () { printExtra(doc.ref); };
+      armed($('recv-ocancel'), 'กดอีกครั้งเพื่อยกเลิก', function (btn) { cancelExtra(doc.ref, btn); });
     }
     sum();
   }
@@ -1468,6 +1531,110 @@
       }).join('') +
       '</tbody></table><div class="sign"><span>ผู้ขอ ' + esc(req.requested_by || '........................................') +
       '</span><span>ผู้จ่าย ........................................</span></div></div>');
+  }
+
+  // ------------------------------------------------------------ ใบเบิกพิเศษ
+  // An extra request to main storage between rounds: any medicine on the lists, any quantity.
+  // Saved with its ใบเบิก number at once (no count, no approval), printed on the main-storage
+  // form, then checked in ตรวจรับยา like a round's ใบเบิก.
+  function extraDrugs() {
+    return S.state.drugs.filter(function (d) { return d.stocked || d.source === 'OPD'; }).sort(byName);
+  }
+  function extraLines() {
+    return extraDrugs().map(function (d) { return { d: d, qty: num(S.exQty[d.drug_id]) }; })
+      .filter(function (x) { return x.qty > 0; });
+  }
+  function extraDocs() {
+    return (S.state.main_docs || []).filter(function (d) { return d.kind === 'EXTRA'; });
+  }
+  function renderExtra() {
+    if (!S.state) return;
+    var q = S.exFilter.trim().toLowerCase();
+    var chosen = extraLines();
+    // typed lines stay on top; the rest only once something is searched
+    var typed = {};
+    chosen.forEach(function (x) { typed[x.d.drug_id] = true; });
+    var found = q ? extraDrugs().filter(function (d) {
+      return !typed[d.drug_id] && (d.name + ' ' + d.hosxp_name + ' ' + d.strength + ' ' + d.item_code).toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 50) : [];
+    function row(d) {
+      var c = d.last_count;
+      return '<tr><td>' + esc(drugLabel(d)) + (d.source === 'OPD' ? ' <span class="badge">ปกติขอ OPD</span>' : '') +
+        (lowNow(d) ? ' <span class="badge danger">ต่ำกว่าขั้นต่ำ</span>' : '') + '</td><td>' + esc(d.unit) + '</td>' +
+        '<td class="num">' + (c ? fmt(c.qty) + ' <span class="muted small">' + thDate(c.date) + '</span>' : '<span class="muted">–</span>') + '</td>' +
+        '<td style="width:96px"><input type="number" min="0" step="1" inputmode="numeric" data-exq="' + esc(d.drug_id) + '" value="' +
+        esc(S.exQty[d.drug_id] === undefined ? '' : S.exQty[d.drug_id]) + '" aria-label="จำนวนที่จะเบิก ' + esc(d.name) + '"></td></tr>';
+    }
+    var list = chosen.map(function (x) { return x.d; }).concat(found);
+    $('ex-list').innerHTML = list.length ? '<div class="table-wrap"><table class="plain"><thead><tr><th>ยา</th><th>หน่วย</th>' +
+      '<th class="num">คงเหลือ (นับล่าสุด)</th><th class="num">จะเบิก</th></tr></thead><tbody>' + list.map(row).join('') + '</tbody></table></div>' +
+      (q && !found.length ? '<p class="muted small">ไม่พบยาที่ค้นหา</p>' : '')
+      : '<p class="muted small">' + (q ? 'ไม่พบยาที่ค้นหา' : 'พิมพ์ชื่อยาในช่องค้นหา แล้วใส่จำนวนที่จะเบิก') + '</p>';
+    $('ex-summary').textContent = chosen.length ? 'จะเบิก ' + chosen.length + ' รายการ' : '';
+    each('[data-exq]', $('ex-list'), function (inp) {
+      inp.oninput = function () {
+        S.exQty[this.getAttribute('data-exq')] = this.value;
+        store('exQty', S.exQty);
+        $('ex-summary').textContent = extraLines().length ? 'จะเบิก ' + extraLines().length + ' รายการ' : '';
+      };
+    });
+    renderExtraHistory();
+  }
+
+  function renderExtraHistory() {
+    var docs = extraDocs(), box = $('ex-history');
+    if (!docs.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="card"><h2>ใบเบิกพิเศษล่าสุด</h2><div class="table-wrap"><table class="plain"><thead><tr><th>วันที่</th><th>ใบเบิก</th>' +
+      '<th class="num">รายการ</th><th>เหตุผล</th><th>ผล</th><th></th></tr></thead><tbody>' +
+      docs.map(function (doc) {
+        var short = doc.lines.filter(function (l) { return num(l.received_qty) !== null && num(l.received_qty) < l.qty; }).length;
+        var res = !doc.received_at ? '<span class="badge warn">รอรับ</span>'
+          : short ? '<span class="badge danger">ได้ไม่ครบ ' + short + ' รายการ</span>' : '<span class="badge ok">ครบ</span>';
+        return '<tr><td>' + thDate(doc.count_date) + '</td><td>' + esc(doc.req_no) + '</td><td class="num">' + doc.lines.length + '</td>' +
+          '<td class="small">' + esc(doc.note) + '</td><td>' + res + '</td>' +
+          '<td><button class="btn small" type="button" data-exprint="' + esc(doc.round_id) + '">' + icon('printer') + 'พิมพ์</button></td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+    each('[data-exprint]', box, function (b) { b.onclick = function () { printExtra(b.getAttribute('data-exprint')); }; });
+  }
+
+  function saveExtra() {
+    var lines = extraLines();
+    if (!lines.length) { toast('ยังไม่ได้ใส่จำนวนที่จะเบิก', true); return; }
+    var btn = $('btn-save-ex');
+    btn.disabled = true;
+    api('apiCreateExtraRequest', lines.map(function (x) { return { drug_id: x.d.drug_id, qty: x.qty }; }), $('ex-note').value).then(function (doc) {
+      replaceMainDoc(doc);
+      S.exQty = {}; store('exQty', {}); $('ex-note').value = '';
+      btn.disabled = false;
+      renderExtra(); renderReceive(); renderShell(); renderHome();
+      toast('บันทึกแล้ว ใบเบิกเลขที่ ' + doc.req_no + ' เมื่อได้ยาให้ตรวจรับที่เมนู ตรวจรับยา');
+      printExtra(doc.round_id);
+    }).catch(function (e) { btn.disabled = false; toast('บันทึกไม่สำเร็จ: ' + errMsg(e), true); });
+  }
+
+  // A ใบเบิกพิเศษ on the same paper form as the round's ใบเบิก (no "คงเหลือ" column: nothing was counted).
+  function printExtra(roundId) {
+    var doc = (S.state.main_docs || []).filter(function (d) { return d.round_id === roundId; })[0];
+    if (!doc) return;
+    var dm = drugMap();
+    var lines = doc.lines.map(function (l, i) {
+      var d = dm[l.drug_id];
+      return { no: i + 1, id: l.drug_id, code: d ? d.item_code : '', name: drugLabel(d) || l.drug_id, unit: d ? d.unit : '',
+        onHand: '', qty: l.qty, boxes: null, pack: null };
+    });
+    printHtml(formPagesHtml(lines, { book: S.head.book, no: doc.req_no, from: S.head.from, to: S.head.to,
+      date: thDate(doc.count_date) + ' (ใบเบิกพิเศษ)' }));
+  }
+
+  function cancelExtra(roundId, btn) {
+    btn.disabled = true;
+    api('apiCancelExtraRequest', roundId).then(function () {
+      S.state.main_docs = (S.state.main_docs || []).filter(function (d) { return d.round_id !== roundId; });
+      delete S.recvQty['MAIN:' + roundId]; delete S.recvExp['MAIN:' + roundId];
+      renderReceive(); renderShell(); renderHome();
+      if (S.reqMode === 'extra') renderExtra();
+      toast('ยกเลิกใบเบิกพิเศษแล้ว');
+    }).catch(function (e) { btn.disabled = false; toast('ยกเลิกไม่สำเร็จ: ' + errMsg(e), true); });
   }
 
   // ---------------------------------------------------------------- import
@@ -1826,6 +1993,9 @@
       renderOpd();
     };
     $('btn-save-opd').onclick = saveOpdRequest;
+    $('ex-search').oninput = function () { S.exFilter = this.value; renderExtra(); };
+    $('btn-ex-clear').onclick = function () { S.exQty = {}; store('exQty', {}); renderExtra(); };
+    $('btn-save-ex').onclick = saveExtra;
     $('btn-copy-opd').onclick = function () {
       var rows = [['ลำดับ', 'รายการ', 'จำนวน', 'หน่วย', 'หมายเหตุ']].concat(opdLines().map(function (x, i) {
         return [i + 1, drugLabel(x.d), x.qty, x.d.unit, 'IPD'];
@@ -1866,7 +2036,9 @@
   if (savedHead) { S.head.book = savedHead.book || ''; S.head.from = savedHead.from || S.head.from; S.head.to = savedHead.to || S.head.to; }
   S.opdSel = load('opdSel', {});
   S.opdQty = load('opdQty', {});
-  S.reqMode = load('reqMode', 'main') === 'opd' ? 'opd' : 'main';
+  S.reqMode = load('reqMode', 'main');
+  if (['main', 'opd', 'extra'].indexOf(S.reqMode) < 0) S.reqMode = 'main';
+  S.exQty = load('exQty', {});
   S.token = load('token', null);
   addIcons(document);
   each('.pl-about-open', null, function (b) {

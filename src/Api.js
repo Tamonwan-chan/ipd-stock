@@ -73,8 +73,12 @@ var Api = (function () {
     return { round_id: r.round_id, count_date: r.count_date, status: r.status, counted_by: r.counted_by || '',
       approved_at: r.approved_at || '', reviewed_by: r.reviewed_by || '',
       received_at: r.received_at || '', received_by: r.received_by || '',
-      req_no: r.req_no || '', receipt_no: r.receipt_no || '' };
+      req_no: r.req_no || '', receipt_no: r.receipt_no || '',
+      kind: isExtra_(r) ? 'EXTRA' : '', note: r.note || '' };
   }
+
+  /** A ใบเบิกพิเศษ (extra main-storage request outside the 2-week round), kept in Rounds. */
+  function isExtra_(r) { return String(r.kind || '').trim().toUpperCase() === 'EXTRA'; }
 
   /**
    * Next document number: ใบเบิก 'บ' (req_no) or ใบรับ 'ร' (receipt_no), e.g. บ.69/0001.
@@ -170,10 +174,12 @@ var Api = (function () {
     var drugs = D.readTable('Drugs', ss);
     var rounds = D.readTable('Rounds', ss);
     rounds.sort(function (a, b) { return a.round_id < b.round_id ? 1 : a.round_id > b.round_id ? -1 : 0; });
+    // The count page only knows the 2-week rounds; ใบเบิกพิเศษ appear in main_docs (ตรวจรับยา).
+    var cycle = rounds.filter(function (r) { return !isExtra_(r); });
 
     var round = null;
-    if (roundId) round = rounds.filter(function (r) { return r.round_id === roundId; })[0] || null;
-    if (!round) round = rounds.filter(function (r) { return r.status !== 'APPROVED'; })[0] || rounds[0] || null;
+    if (roundId) round = cycle.filter(function (r) { return r.round_id === roundId; })[0] || null;
+    if (!round) round = cycle.filter(function (r) { return r.status !== 'APPROVED'; })[0] || cycle[0] || null;
 
     var lines = {}, lastCount = {}, byRound = {};
     var roundDate = {};
@@ -233,7 +239,7 @@ var Api = (function () {
       drugs: out,
       round: round ? roundInfo_(round) : null,
       lines: lines,
-      rounds: rounds.slice(0, 20).map(roundInfo_),
+      rounds: cycle.slice(0, 20).map(roundInfo_),
       main_docs: mainDocs_(rounds, byRound),
       opd_requests: opdRequests_(ss),
       expiry: expiryOnHand_(readOptional_('Expiry', ss))
@@ -243,6 +249,7 @@ var Api = (function () {
   /**
    * Main-storage ใบเบิก for ตรวจรับยา, newest first: every approved one still waiting for its
    * delivery check, then the last 10 received. Rounds not approved yet are never listed.
+   * ใบเบิกพิเศษ are included (approved when saved; cancelled ones are left out).
    */
   function mainDocs_(rounds, byRound) {
     var docs = rounds.filter(function (r) { return r.status === 'APPROVED'; }).map(function (r) {
@@ -345,7 +352,7 @@ var Api = (function () {
   function startRound(ss) {
     var D = db_();
     var rounds = D.readTable('Rounds', ss);
-    var open = rounds.filter(function (r) { return r.status !== 'APPROVED'; })[0];
+    var open = rounds.filter(function (r) { return !isExtra_(r) && r.status !== 'APPROVED'; })[0];
     if (open) return roundInfo_(open);
     var today = today_();
     var id = today, n = 2;
@@ -374,6 +381,7 @@ var Api = (function () {
   function saveLines(roundId, edits, ss) {
     var C = calc_(), D = db_();
     var round = roundById_(roundId, ss);
+    if (isExtra_(round)) throw new Error('ใบเบิกพิเศษไม่มีการนับ แก้ในหน้านับยาไม่ได้');
     if (round.status === 'APPROVED') throw new Error('รอบนี้อนุมัติแล้ว แก้ไขไม่ได้');
     D.ensureColumns('RoundLines', ss); // Sheets set up before boxes / pack_size existed
     D.ensureColumns('Drugs', ss);
@@ -440,6 +448,7 @@ var Api = (function () {
     D.ensureColumns('RoundLines', ss);
     D.ensureColumns('Expiry', ss);
     var round = roundById_(roundId, ss);
+    if (round.status === 'CANCELLED') throw new Error('ใบเบิกนี้ยกเลิกแล้ว');
     if (round.status !== 'APPROVED') throw new Error('ใบเบิกนี้ยังไม่อนุมัติ ยังตรวจรับไม่ได้');
     var lines = {};
     D.readTable('RoundLines', ss).forEach(function (l) { if (l.round_id === roundId) lines[l.drug_id] = l; });
@@ -498,6 +507,7 @@ var Api = (function () {
     var D = db_();
     D.ensureColumns('Rounds', ss);
     var round = roundById_(roundId, ss);
+    if (round.status === 'CANCELLED') throw new Error('ใบเบิกนี้ยกเลิกแล้ว');
     if (round.status !== 'APPROVED') throw new Error('ใบเบิกนี้ยังไม่อนุมัติ ยังตรวจรับไม่ได้');
     if (round.received_at) throw new Error('ใบเบิกนี้ยืนยันรับเข้าคลังแล้ว');
     var lines = D.readTable('RoundLines', ss).filter(function (l) { return l.round_id === roundId && requested_(l) > 0; });
@@ -633,11 +643,70 @@ var Api = (function () {
     return opdInfo_(r, []);
   }
 
+  /**
+   * ใบเบิกพิเศษ: an extra request to main storage between 2-week rounds (any medicine, any
+   * quantity, no count). Like an OPD request it needs no approval: it gets its ใบเบิก number
+   * when saved, prints on the main-storage form and is checked in ตรวจรับยา.
+   * Kept in Rounds (kind EXTRA, status APPROVED) so the delivery check and stock card work as usual.
+   * @param {{drug_id:string, qty:*}[]} lines  lines with qty ≤ 0 are dropped
+   * @param {string} note  optional reason, kept with the request and in the change log
+   * @return {Object} the ใบเบิก as in main_docs
+   */
+  function createExtraRequest(lines, note, ss) {
+    var C = calc_(), D = db_();
+    D.ensureColumns('Rounds', ss);
+    D.ensureColumns('RoundLines', ss);
+    var drugs = {};
+    D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
+    var seen = {};
+    var rows = (lines || []).map(function (l) {
+      if (!drugs[l.drug_id]) throw new Error('ไม่พบยา ' + l.drug_id);
+      if (seen[l.drug_id]) throw new Error('ยาซ้ำในรายการ ' + l.drug_id);
+      seen[l.drug_id] = true;
+      var q = C.toNumber(l.qty);
+      if (q !== null && q < 0) throw new Error('จำนวนไม่ถูกต้อง: ' + l.qty);
+      return { drug_id: l.drug_id, qty: q };
+    }).filter(function (l) { return l.qty > 0; });
+    if (!rows.length) throw new Error('ยังไม่มีรายการที่จะเบิก');
+
+    var today = today_();
+    var ids = D.readTable('Rounds', ss).map(function (r) { return r.round_id; });
+    var id = 'EX-' + today, n = 2;
+    while (ids.indexOf(id) >= 0) id = 'EX-' + today + '-' + n++;
+    var r = { round_id: id, count_date: today, status: 'APPROVED', kind: 'EXTRA', counted_by: actor_(),
+      reviewed_by: actor_(), approved_at: now_(), note: String(note || '').trim(),
+      req_no: nextNo_('บ', 'req_no', ss), receipt_no: '' };
+    D.appendRows('Rounds', [r], ss);
+    var out = rows.map(function (l) {
+      return { round_id: id, drug_id: l.drug_id, on_hand: '', par_used: '', suggested_qty: '', final_qty: l.qty,
+        boxes: '', pack_size: '', change_reason: '', flags: '', received_qty: '' };
+    });
+    D.appendRows('RoundLines', out, ss);
+    log_([['ใบเบิกพิเศษ', r.req_no, (r.note ? 'เหตุผล: ' + r.note + ' · ' : '') + rows.map(function (l) {
+      return drugLabel_(drugs[l.drug_id]) + ' ' + l.qty;
+    }).join(', ')]], ss);
+    return mainDoc_(r, out);
+  }
+
+  /** Cancel a ใบเบิกพิเศษ saved by mistake or never sent (before its delivery check is confirmed). */
+  function cancelExtraRequest(roundId, ss) {
+    var D = db_();
+    var r = roundById_(roundId, ss);
+    if (!isExtra_(r)) throw new Error('ยกเลิกได้เฉพาะใบเบิกพิเศษ');
+    if (r.received_at) throw new Error('ยืนยันรับเข้าคลังแล้ว ยกเลิกไม่ได้');
+    if (r.status === 'CANCELLED') return roundInfo_(r);
+    r.status = 'CANCELLED';
+    D.updateFields('Rounds', [r], ['status'], ss);
+    log_([['ยกเลิกใบเบิกพิเศษ', r.req_no || roundId, '']], ss);
+    return roundInfo_(r);
+  }
+
   /** Approve (freeze) a round. Its ใบเบิก gets a number (บ.69/0001) if anything is requested. */
   function approveRound(roundId, ss) {
     var D = db_();
     D.ensureColumns('Rounds', ss);
     var round = roundById_(roundId, ss);
+    if (isExtra_(round)) throw new Error('ใบเบิกพิเศษไม่ต้องอนุมัติ ได้เลขใบเบิกตอนบันทึก');
     if (round.status === 'APPROVED') throw new Error('รอบนี้อนุมัติแล้ว');
     var mine = D.readTable('RoundLines', ss).filter(function (l) { return l.round_id === roundId; });
     round.status = 'APPROVED';
@@ -706,7 +775,8 @@ var Api = (function () {
     D.readTable('RoundLines', ss).forEach(function (l) {
       if (l.drug_id !== drugId || !rounds[l.round_id]) return;
       var r = rounds[l.round_id], req = requested_(l);
-      hist.push({ type: 'MAIN', ref: l.round_id, date: r.count_date, status: r.status,
+      if (r.status === 'CANCELLED') return;
+      hist.push({ type: 'MAIN', ref: l.round_id, date: r.count_date, status: r.status, kind: isExtra_(r) ? 'EXTRA' : '',
         on_hand: l.on_hand, requested: req === null ? '' : req,
         boxes: l.boxes === undefined ? '' : l.boxes, pack_size: l.pack_size === undefined ? '' : l.pack_size,
         received_qty: l.received_qty === undefined ? '' : l.received_qty, received_at: r.received_at || '' });
@@ -808,7 +878,8 @@ var Api = (function () {
   return { state: state, importFile: importFile, startRound: startRound, saveLines: saveLines, approveRound: approveRound,
     saveReceived: saveReceived, confirmReceipt: confirmReceipt, createOpdRequest: createOpdRequest,
     saveOpdReceived: saveOpdReceived, confirmOpdReceipt: confirmOpdReceipt,
-    cancelOpdRequest: cancelOpdRequest, removeExpiry: removeExpiry, drugCard: drugCard, saveDrug: saveDrug,
+    cancelOpdRequest: cancelOpdRequest, createExtraRequest: createExtraRequest, cancelExtraRequest: cancelExtraRequest,
+    removeExpiry: removeExpiry, drugCard: drugCard, saveDrug: saveDrug,
     changeLog: changeLog, setActor: setActor, log: log_ };
 })();
 
@@ -860,6 +931,8 @@ function apiConfirmOpdReceipt(token, requestId) { return locked_(token, null, fu
 function apiCreateOpdRequest(token, kind, lines, note) { return locked_(token, null, function () { return Api.createOpdRequest(kind, lines, note); }); }
 function apiSaveOpdReceived(token, requestId, edits) { return locked_(token, null, function () { return Api.saveOpdReceived(requestId, edits); }); }
 function apiCancelOpdRequest(token, requestId) { return locked_(token, null, function () { return Api.cancelOpdRequest(requestId); }); }
+function apiCreateExtraRequest(token, lines, note) { return locked_(token, null, function () { return Api.createExtraRequest(lines, note); }); }
+function apiCancelExtraRequest(token, roundId) { return locked_(token, null, function () { return Api.cancelExtraRequest(roundId); }); }
 function apiApproveRound(token, roundId) { return locked_(token, null, function () { return Api.approveRound(roundId); }); }
 function apiRemoveExpiry(token, ref, drugId, expDate) { return locked_(token, null, function () { return Api.removeExpiry(ref, drugId, expDate); }); }
 function apiDrugCard(token, drugId) { session_(token); return Api.drugCard(drugId); }

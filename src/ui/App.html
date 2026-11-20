@@ -40,11 +40,12 @@
     <aside class="side">
       <div class="brand"><b>สต็อกยา IPD</b><span class="muted small">ห้องยาผู้ป่วยใน</span></div>
       <nav id="nav" class="nav" aria-label="เมนู">
+        <!-- in the order of the work: import → count and request → delivery check, then lookups -->
         <button data-view="home" data-icon="home-2">หน้าหลัก</button>
-        <button data-view="drugs" data-icon="pharmacy">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
+        <button data-view="import" data-icon="folder">นำเข้าข้อมูล HOSxP</button>
         <button data-view="request" data-icon="shop">เบิกยา</button>
         <button data-view="receive" data-icon="mailbox">ตรวจรับยา<span class="nav-count" id="nav-recv" hidden></span></button>
-        <button data-view="import" data-icon="folder">นำเข้าข้อมูล HOSxP</button>
+        <button data-view="drugs" data-icon="pharmacy">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
         <button data-view="minmax" data-icon="printer">ป้ายสูงสุด/ต่ำสุด</button>
         <div class="nav-group admin-only" hidden>ผู้ดูแลระบบ</div>
         <button data-view="users" data-icon="user-2" class="admin-only" hidden>ผู้ใช้งาน</button>
@@ -56,7 +57,6 @@
           <button class="link" id="btn-pw" type="button" data-icon="lock">เปลี่ยนรหัสผ่าน</button>
           <button class="link" id="btn-logout" type="button" data-icon="exit">ออกจากระบบ</button>
         </div>
-        <a class="credit" href="https://www.streamlinehq.com" target="_blank" rel="noopener">ไอคอนจาก Streamline</a>
       </div>
     </aside>
 
@@ -85,6 +85,7 @@
         <div class="seg" role="tablist" aria-label="เบิกจาก">
           <button role="tab" data-mode="main">เบิกจากคลัง (ทุก 2 สัปดาห์)</button>
           <button role="tab" data-mode="opd">เบิกจาก OPD</button>
+          <button role="tab" data-mode="extra">ใบเบิกพิเศษ (จากคลัง)</button>
         </div>
 
         <div id="req-main">
@@ -134,6 +135,28 @@
             <div id="opd-list"></div>
           </div>
           <div id="opd-history"></div>
+        </div>
+
+        <div id="req-extra" hidden>
+          <div class="card">
+            <h2>ใบเบิกพิเศษ เบิกเพิ่มจากคลัง</h2>
+            <p class="muted small">ใช้เมื่อต้องการเบิกจากคลังเพิ่มระหว่างรอบ 2 สัปดาห์ ไม่ต้องนับ ไม่ต้องอนุมัติ
+              ค้นหายา ใส่จำนวนที่จะเบิก (หน่วยตามที่เบิก) แล้วกด บันทึกและพิมพ์ใบเบิก ระบบออกเลขใบเบิกให้ทันที
+              เมื่อได้ยาแล้ว ตรวจรับที่เมนู ตรวจรับยา เหมือนใบเบิกรอบปกติ</p>
+            <div class="row">
+              <input type="search" id="ex-search" placeholder="ค้นหายา" aria-label="ค้นหายา">
+              <button class="btn" id="btn-ex-clear" type="button">ล้างที่ใส่</button>
+            </div>
+            <div id="ex-list"></div>
+            <div class="row">
+              <label class="field grow">เหตุผล (ไม่บังคับ)<input type="text" id="ex-note" placeholder="เช่น ผู้ป่วยใหม่ใช้ยานี้มาก"></label>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="btn-save-ex" type="button" data-icon="printer">บันทึกและพิมพ์ใบเบิก</button>
+              <span id="ex-summary" class="muted small"></span>
+            </div>
+          </div>
+          <div id="ex-history"></div>
         </div>
       </section>
 
@@ -219,6 +242,8 @@
        งานที่พัฒนาต่อต้องระบุว่า "พัฒนาต้นแบบโดย ภญ.ธมลวรรณ จันทร์แก้ว"</p>
     <p class="pl-small">© 2026 Tamonwan Chankaew. All rights reserved. Use or modification requires written permission.
        Results must be checked by a qualified professional before use with patients.</p>
+    <p class="pl-small">ไอคอน: ชุด Guidance จาก <a href="https://www.streamlinehq.com" target="_blank" rel="noopener">Streamline</a>
+       ใช้ภายใต้สัญญาอนุญาต <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a></p>
     <form method="dialog"><button class="btn" type="submit">ปิด</button></form>
   </dialog>
 

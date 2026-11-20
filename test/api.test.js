@@ -318,6 +318,57 @@ test('OPD requests: ใบเบิก number when saved, draft receive, confirm
   assert.throws(() => Api.saveOpdReceived(req.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่อยู่ในรายการ/);
 });
 
+test('ใบเบิกพิเศษ: number when saved, checked like a round, kept off the count page, cancel', () => {
+  const ss = setup();
+  Api.setActor('Nurse A');
+  const st = Api.state(null, ss);
+  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
+  const slow = st.drugs.find(x => x.hosxp_name === 'Slow tab'); // an OPD drug can be requested from main storage too
+  assert.throws(() => Api.createExtraRequest([{ drug_id: busy.drug_id, qty: 0 }], '', ss), /ยังไม่มีรายการ/);
+  assert.throws(() => Api.createExtraRequest([{ drug_id: 'D999', qty: 1 }], '', ss), /ไม่พบยา/);
+
+  const doc = Api.createExtraRequest([{ drug_id: busy.drug_id, qty: 30 }, { drug_id: slow.drug_id, qty: '5' }], ' ผู้ป่วยใหม่หลายราย ', ss);
+  assert.equal(doc.kind, 'EXTRA');
+  assert.equal(doc.status, 'APPROVED');
+  assert.equal(doc.note, 'ผู้ป่วยใหม่หลายราย');
+  assert.equal(doc.req_no, `บ.${YY}/0001`);
+  assert.deepEqual(doc.lines.map(l => [l.drug_id, l.qty]), [[busy.drug_id, 30], [slow.drug_id, 5]]);
+
+  // not a 2-week round: the count page has no round, and starting one makes a normal round
+  let s2 = Api.state(null, ss);
+  assert.equal(s2.round, null);
+  assert.deepEqual(s2.rounds, []);
+  assert.deepEqual(s2.main_docs.map(d => d.round_id), [doc.round_id]);
+  const r = Api.startRound(ss);
+  assert.notEqual(r.round_id, doc.round_id);
+  assert.equal(r.kind, '');
+  assert.throws(() => Api.saveLines(doc.round_id, [{ drug_id: busy.drug_id, on_hand: 1 }], ss), /ใบเบิกพิเศษ/);
+  assert.throws(() => Api.approveRound(doc.round_id, ss), /ใบเบิกพิเศษ/);
+  assert.equal(Api.state(null, ss).round.round_id, r.round_id);
+
+  // delivery check exactly like a round's ใบเบิก
+  Api.saveReceived(doc.round_id, [{ drug_id: busy.drug_id, received_qty: 30, exp: ['2027-06-30'] },
+    { drug_id: slow.drug_id, received_qty: 0 }], ss);
+  const got = Api.confirmReceipt(doc.round_id, ss);
+  assert.equal(got.receipt_no, `ร.${YY}/0001`);
+  const card = Api.drugCard(busy.drug_id, ss);
+  assert.deepEqual(card.history.map(h => [h.type, h.kind, h.requested, h.received_qty]), [['MAIN', 'EXTRA', 30, 30]]);
+  assert.throws(() => Api.cancelExtraRequest(doc.round_id, ss), /ยกเลิกไม่ได้/);
+
+  // cancel: gone from ตรวจรับยา and the stock card; numbers are not reused
+  const doc2 = Api.createExtraRequest([{ drug_id: busy.drug_id, qty: 10 }], '', ss);
+  assert.equal(doc2.req_no, `บ.${YY}/0002`);
+  assert.notEqual(doc2.round_id, doc.round_id);
+  assert.throws(() => Api.cancelExtraRequest(r.round_id, ss), /เฉพาะใบเบิกพิเศษ/);
+  assert.equal(Api.cancelExtraRequest(doc2.round_id, ss).status, 'CANCELLED');
+  assert.ok(!Api.state(null, ss).main_docs.some(d => d.round_id === doc2.round_id));
+  assert.equal(Api.drugCard(busy.drug_id, ss).history.filter(h => h.kind === 'EXTRA').length, 1);
+  assert.throws(() => Api.saveReceived(doc2.round_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ยกเลิกแล้ว/);
+  const log = Api.changeLog(50, ss);
+  assert.ok(log.some(x => x.action === 'ใบเบิกพิเศษ' && /ผู้ป่วยใหม่หลายราย/.test(x.detail) && x.user === 'Nurse A'));
+  assert.ok(log.some(x => x.action === 'ยกเลิกใบเบิกพิเศษ'));
+});
+
 test('counting a drug fetched from OPD: count only, nothing requested; latest count in state', () => {
   const ss = setup();
   const r = Api.startRound(ss);

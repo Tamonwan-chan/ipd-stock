@@ -82,7 +82,8 @@ var Schema = (function () {
         ['received_at', 'datetime'],
         ['received_by', 'string'],
         ['req_no', 'string'],     // ใบเบิก number, given at approval (บ.69/0001)
-        ['receipt_no', 'string']  // ใบรับ number, given when the delivery check is confirmed (ร.69/0001)
+        ['receipt_no', 'string'], // ใบรับ number, given when the delivery check is confirmed (ร.69/0001)
+        ['kind', 'string']        // '' = the 2-week round; EXTRA = ใบเบิกพิเศษ (extra request, no count)
       ])
     },
     RoundLines: {
@@ -190,7 +191,8 @@ var Schema = (function () {
     source: ['MAIN', 'OPD', 'NONE'],
     source_calc: ['MAIN', 'OPD'],
     location: ['ตู้เก็บยา', 'ชั้นวางยา', 'ลิ้นชักยา'],
-    status: ['COUNTING', 'REVIEW', 'APPROVED'],
+    status: ['COUNTING', 'REVIEW', 'APPROVED', 'CANCELLED'], // CANCELLED: ใบเบิกพิเศษ only
+    round_kind: ['', 'EXTRA'],
     kind: ['MONTHLY', 'URGENT'],
     opd_status: ['REQUESTED', 'RECEIVED', 'CANCELLED'],
     role: ['staff', 'admin'],
