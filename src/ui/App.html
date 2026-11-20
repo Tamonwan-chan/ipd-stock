@@ -40,11 +40,13 @@
     <aside class="side">
       <div class="brand"><b>สต็อกยา IPD</b><span class="muted small">ห้องยาผู้ป่วยใน</span></div>
       <nav id="nav" class="nav" aria-label="เมนู">
-        <!-- in the order of the work: import → count and request → delivery check, then lookups -->
+        <!-- the main job, in the order of the work: import → count and request → delivery check -->
         <button data-view="home" data-icon="home-2">หน้าหลัก</button>
         <button data-view="import" data-icon="folder">นำเข้าข้อมูล HOSxP</button>
         <button data-view="request" data-icon="shop">เบิกยา</button>
         <button data-view="receive" data-icon="mailbox">ตรวจรับยา<span class="nav-count" id="nav-recv" hidden></span></button>
+        <!-- lookups and set-up, used now and then -->
+        <div class="nav-group">ข้อมูลยา</div>
         <button data-view="drugs" data-icon="pharmacy">รายการยา<span class="nav-count" id="nav-low" hidden></span></button>
         <button data-view="minmax" data-icon="printer">ป้ายสูงสุด/ต่ำสุด</button>
         <div class="nav-group admin-only" hidden>ผู้ดูแลระบบ</div>
