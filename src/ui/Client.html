@@ -424,9 +424,9 @@
         : '<p class="muted small">ไม่มี</p>') + '</div>';
     box.innerHTML = html;
     box.onclick = function (e) {
-      var t = e.target.closest('[data-go],[data-open],[data-urgent],[data-print-count]');
+      var t = e.target.closest('[data-step],[data-go],[data-open],[data-urgent]');
       if (!t) return;
-      if (t.hasAttribute('data-print-count')) { printCountSheet(); return; }
+      if (t.hasAttribute('data-step')) { stepGo(t.getAttribute('data-step')); return; }
       if (t.hasAttribute('data-open')) { showView('drugs'); openDrug(t.getAttribute('data-open')); return; }
       if (t.hasAttribute('data-urgent')) { urgentOpd(t.getAttribute('data-urgent')); return; }
       var g = t.getAttribute('data-go');
@@ -439,36 +439,97 @@
     return '<button type="button" class="tile ' + cls + '" data-go="' + go + '"><b>' + fmt(n, 0) + '</b><span>' + esc(label) + '</span></button>';
   }
 
-  // The 2-week round as steps; used on the home page and above the count list.
-  function roundSummary(withLink) {
+  // The 2-week round as steps; used on the home page and above the count list. Every step is a
+  // button that goes to where that step is done. A done step is green with ✓; the next step to do
+  // is marked ถัดไป. Approval closes steps 2–4 (counting and เบิกจริง are frozen then).
+  function roundSteps() {
     var st = S.state, r = st.round;
     var drugs = r ? stockedDrugs() : [];
     var c = r ? counts(drugs) : { counted: 0, ordering: 0 };
+    var opdAll = opdShelfDrugs().length;
     var opdCounted = r ? opdShelfDrugs().filter(function (d) { return lineOf(d).counted; }).length : 0;
-    var approved = r && r.status === 'APPROVED';
-    var received = r && !!r.received_at;
+    var open = !!r && r.status !== 'APPROVED';
+    var approved = !!r && r.status === 'APPROVED';
+    var received = !!r && !!r.received_at;
     // Step 1 is done when the HOSxP data reaches within a week of the count date (or today).
     var ref = parseIso(r ? r.count_date : st.today), to = parseIso(st.usage.to);
     var fresh = !!(ref && to && ref - to <= 7 * 86400000);
-    var steps = [
-      ['นำเข้าข้อมูล HOSxP', st.usage.to ? 'ข้อมูลถึง ' + thDate(st.usage.to) : 'ยังไม่มีข้อมูล',
-        fresh ? 'done' : '<button class="btn small" type="button" data-go="import">นำเข้า</button>'],
-      ['พิมพ์ใบนับยา', '', '<button class="btn small" type="button" data-print-count>' + icon('printer') + 'พิมพ์</button>'],
-      ['กรอกยอดนับ', r ? c.counted + '/' + drugs.length + (opdShelfDrugs().length ? ' · OPD ' + opdCounted + '/' + opdShelfDrugs().length : '') : '', r && c.counted === drugs.length && drugs.length ? 'done' : ''],
-      ['เบิกจริง / กล่อง', r ? 'ต้องเบิก ' + c.ordering + ' รายการ' : '', ''],
-      ['อนุมัติ', approved ? (r.req_no ? 'ใบเบิก ' + r.req_no + ' · ' : '') + thDateTime(r.approved_at) : '', approved ? 'done' : ''],
-      ['พิมพ์ใบเบิก ส่งคลัง', '', ''],
-      ['ตรวจรับ + วันหมดอายุ', received ? (r.receipt_no ? 'ใบรับ ' + r.receipt_no + ' · ' : '') + thDateTime(r.received_at) : '', received ? 'done' : '']
+    var started = c.counted > 0 || opdCounted > 0;
+    return [
+      { name: 'นำเข้าข้อมูล HOSxP', go: 'import', done: fresh,
+        sub: st.usage.to ? 'ข้อมูลถึง ' + thDate(st.usage.to) : 'ยังไม่มีข้อมูล' },
+      { name: 'พิมพ์ใบนับยา', go: 'print-count', done: !!r && (approved || started || !!r.count_printed_at), icon: 'printer',
+        sub: r && r.count_printed_at ? 'พิมพ์ ' + thDateTime(r.count_printed_at) : open ? 'กดเพื่อพิมพ์' : '' },
+      { name: 'กรอกยอดนับ', go: 'count', done: approved || (open && drugs.length > 0 && c.counted === drugs.length),
+        sub: r ? 'นับแล้ว ' + c.counted + '/' + drugs.length + (opdAll ? ' · OPD ' + opdCounted + '/' + opdAll : '') : '' },
+      { name: 'เบิกจริง / กล่อง', go: 'count', done: approved,
+        sub: r ? 'ต้องเบิก ' + c.ordering + ' รายการ' : '' },
+      { name: 'อนุมัติ', go: 'approve', done: approved,
+        sub: approved ? (r.req_no ? 'ใบเบิก ' + r.req_no + ' · ' : '') + thDateTime(r.approved_at) : '' },
+      { name: 'พิมพ์ใบเบิก ส่งคลัง', go: 'form', done: approved && (received || !!r.form_printed_at), icon: 'printer',
+        sub: r && r.form_printed_at ? 'พิมพ์ ' + thDateTime(r.form_printed_at) : '' },
+      { name: 'ตรวจรับ + วันหมดอายุ', go: 'receive', done: received,
+        sub: received ? (r.receipt_no ? 'ใบรับ ' + r.receipt_no + ' · ' : '') + thDateTime(r.received_at) : '' }
     ];
+  }
+  function roundSummary(withLink) {
+    var r = S.state.round, approved = r && r.status === 'APPROVED';
+    // ถัดไป = the first step not done after the last one done (a step skipped earlier, e.g. an old
+    // import, doesn't pull "next" back once the round has moved on).
+    var steps = roundSteps(), last = -1, next = -1;
+    steps.forEach(function (s, i) { if (s.done) last = i; });
+    for (var i = last + 1; i < steps.length; i++) if (!steps[i].done) { next = i; break; }
     var title = r ? 'รอบเบิกจากคลัง ' + thDate(r.count_date) : 'ยังไม่มีรอบเบิกจากคลัง';
     return '<div class="card"><div class="row"><h2>' + esc(title) + '</h2>' +
       (r ? (approved ? '<span class="badge ok">อนุมัติแล้ว</span>' : '<span class="badge">กำลังนับ</span>') : '') +
+      (r && r.received_at ? '<span class="badge ok">รับเข้าคลังแล้ว</span>' : '') +
       '<span class="spacer"></span>' + (withLink ? '<button class="btn primary" type="button" data-go="req-main">ไปที่เบิกยา</button>' : '') + '</div>' +
-      '<ol class="steps">' + steps.map(function (s) {
-        var done = s[2] === 'done';
-        return '<li class="' + (done ? 'done' : '') + '"><span class="step-name">' + esc(s[0]) + '</span>' +
-          (s[1] ? '<span class="muted small">' + esc(s[1]) + '</span>' : '') + (s[2] && !done ? s[2] : '') + '</li>';
+      '<ol class="steps">' + steps.map(function (s, i) {
+        var cls = s.done ? 'done' : i === next ? 'next' : '';
+        var label = s.done ? '✓ ' + (i + 1) : (i === next ? 'ถัดไป · ขั้นที่ ' : 'ขั้นที่ ') + (i + 1);
+        return '<li class="' + cls + '"><button type="button" class="step" data-step="' + s.go + '"' + (i === next ? ' aria-current="step"' : '') + '>' +
+          '<span class="step-no">' + label + '</span>' +
+          '<span class="step-name">' + (s.icon ? icon(s.icon) : '') + esc(s.name) + '</span>' +
+          (s.sub ? '<span class="muted small">' + esc(s.sub) + '</span>' : '') + '</button></li>';
       }).join('') + '</ol></div>';
+  }
+  // Where each step is done.
+  function stepGo(go) {
+    if (go === 'import') { showView('import'); return; }
+    if (go === 'print-count') { printCountSheet(); return; }
+    if (go === 'receive') {
+      var r = S.state.round;
+      if (r && (S.state.main_docs || []).some(function (d) { return d.round_id === r.round_id; })) S.recvSel = 'MAIN:' + r.round_id;
+      else if (r && r.status !== 'APPROVED') toast('ตรวจรับได้หลังอนุมัติรอบและส่งใบเบิกแล้ว');
+      showView('receive');
+      if (S.recvSel && $('recv-doc')) $('recv-doc').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    S.reqMode = 'main'; store('reqMode', 'main');
+    S.reqSub = go === 'form' ? 'form' : 'count';
+    showView('request');
+    if (go === 'approve') {
+      var b = $('btn-approve');
+      if (b) { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); b.focus(); }
+    } else if (go === 'count' && $('sub-count')) {
+      $('sub-count').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+  // After printing: remember it on the round (so the step turns green on every PC), then redraw the steps.
+  function markPrinted(which) {
+    var r = S.state.round;
+    if (!r) return;
+    if (which === 'count' ? r.status === 'APPROVED' : r.status !== 'APPROVED') return;
+    api('apiMarkPrinted', r.round_id, which).then(function (info) {
+      if (!S.state.round || S.state.round.round_id !== info.round_id) return;
+      S.state.round.count_printed_at = info.count_printed_at;
+      S.state.round.form_printed_at = info.form_printed_at;
+      refreshSteps();
+    }).catch(function () {});
+  }
+  function refreshSteps() {
+    renderHome();
+    if ($('round-card') && !$('view-request').hidden) $('round-card').innerHTML = roundSummary(false);
   }
 
   // ------------------------------------------------------------- medicines
@@ -663,8 +724,8 @@
     $('sub-form').hidden = S.reqSub !== 'form';
     $('round-card').innerHTML = roundSummary(false);
     $('round-card').onclick = function (e) {
-      if (e.target.closest('[data-print-count]')) printCountSheet();
-      if (e.target.closest('[data-go="import"]')) showView('import');
+      var t = e.target.closest('[data-step]');
+      if (t) stepGo(t.getAttribute('data-step'));
     };
     if (S.reqMode === 'main') { renderCount(); renderForm(); }
     else if (S.reqMode === 'extra') renderExtra();
@@ -704,6 +765,7 @@
       html += '</tbody></table>';
     }
     printHtml(html + '</div>');
+    markPrinted('count');
   }
 
   // ----------------------------------------------------------------- count
@@ -1978,7 +2040,9 @@
     ['book', 'no', 'from', 'to', 'date'].forEach(function (k) {
       $('fh-' + k).oninput = function () { S.head[k] = this.value; store('head', { book: S.head.book, from: S.head.from, to: S.head.to }); renderForm(); };
     });
-    $('btn-print-form').onclick = function () { flushSave().then(function () { renderForm(); printHtml($('form-pages').innerHTML); }); };
+    $('btn-print-form').onclick = function () {
+      flushSave().then(function () { renderForm(); printHtml($('form-pages').innerHTML); markPrinted('form'); });
+    };
     $('btn-csv-form').onclick = function () {
       download('ใบเบิก-IPD-' + (S.state.round ? S.state.round.count_date : S.state.today) + '.csv', toCsv(formRows()));
     };

@@ -74,7 +74,8 @@ var Api = (function () {
       approved_at: r.approved_at || '', reviewed_by: r.reviewed_by || '',
       received_at: r.received_at || '', received_by: r.received_by || '',
       req_no: r.req_no || '', receipt_no: r.receipt_no || '',
-      kind: isExtra_(r) ? 'EXTRA' : '', note: r.note || '' };
+      kind: isExtra_(r) ? 'EXTRA' : '', note: r.note || '',
+      count_printed_at: r.count_printed_at || '', form_printed_at: r.form_printed_at || '' };
   }
 
   /** A ใบเบิกพิเศษ (extra main-storage request outside the 2-week round), kept in Rounds. */
@@ -701,6 +702,25 @@ var Api = (function () {
     return roundInfo_(r);
   }
 
+  /**
+   * Record that a round's paper was printed, so the round's steps (หน้าหลัก) can show it done:
+   * `count` = the count sheet (round still open), `form` = the ใบเบิก (round approved).
+   * Keeps the latest time. Not in the change log: printing changes no data.
+   */
+  function markPrinted(roundId, which, ss) {
+    var D = db_();
+    var field = { count: 'count_printed_at', form: 'form_printed_at' }[which];
+    if (!field) throw new Error('ไม่รู้จักเอกสาร: ' + which);
+    D.ensureColumns('Rounds', ss);
+    var r = roundById_(roundId, ss);
+    if (isExtra_(r)) throw new Error('ใบเบิกพิเศษไม่มีขั้นตอนของรอบ');
+    if (which === 'count' && r.status === 'APPROVED') throw new Error('รอบนี้อนุมัติแล้ว');
+    if (which === 'form' && r.status !== 'APPROVED') throw new Error('รอบนี้ยังไม่อนุมัติ');
+    r[field] = now_();
+    D.updateFields('Rounds', [r], [field], ss);
+    return roundInfo_(r);
+  }
+
   /** Approve (freeze) a round. Its ใบเบิก gets a number (บ.69/0001) if anything is requested. */
   function approveRound(roundId, ss) {
     var D = db_();
@@ -879,6 +899,7 @@ var Api = (function () {
     saveReceived: saveReceived, confirmReceipt: confirmReceipt, createOpdRequest: createOpdRequest,
     saveOpdReceived: saveOpdReceived, confirmOpdReceipt: confirmOpdReceipt,
     cancelOpdRequest: cancelOpdRequest, createExtraRequest: createExtraRequest, cancelExtraRequest: cancelExtraRequest,
+    markPrinted: markPrinted,
     removeExpiry: removeExpiry, drugCard: drugCard, saveDrug: saveDrug,
     changeLog: changeLog, setActor: setActor, log: log_ };
 })();
@@ -933,6 +954,7 @@ function apiSaveOpdReceived(token, requestId, edits) { return locked_(token, nul
 function apiCancelOpdRequest(token, requestId) { return locked_(token, null, function () { return Api.cancelOpdRequest(requestId); }); }
 function apiCreateExtraRequest(token, lines, note) { return locked_(token, null, function () { return Api.createExtraRequest(lines, note); }); }
 function apiCancelExtraRequest(token, roundId) { return locked_(token, null, function () { return Api.cancelExtraRequest(roundId); }); }
+function apiMarkPrinted(token, roundId, which) { return locked_(token, null, function () { return Api.markPrinted(roundId, which); }); }
 function apiApproveRound(token, roundId) { return locked_(token, null, function () { return Api.approveRound(roundId); }); }
 function apiRemoveExpiry(token, ref, drugId, expDate) { return locked_(token, null, function () { return Api.removeExpiry(ref, drugId, expDate); }); }
 function apiDrugCard(token, drugId) { session_(token); return Api.drugCard(drugId); }

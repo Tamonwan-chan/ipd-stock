@@ -369,6 +369,24 @@ test('ใบเบิกพิเศษ: number when saved, checked like a round
   assert.ok(log.some(x => x.action === 'ยกเลิกใบเบิกพิเศษ'));
 });
 
+test('markPrinted: count sheet while counting, ใบเบิก once approved; shown in state', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  assert.equal(Api.state(null, ss).round.count_printed_at, '');
+  Api.markPrinted(r.round_id, 'count', ss);
+  assert.match(Api.state(null, ss).round.count_printed_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.throws(() => Api.markPrinted(r.round_id, 'form', ss), /ยังไม่อนุมัติ/);
+  assert.throws(() => Api.markPrinted(r.round_id, 'other', ss), /ไม่รู้จัก/);
+  Api.approveRound(r.round_id, ss);
+  assert.throws(() => Api.markPrinted(r.round_id, 'count', ss), /อนุมัติแล้ว/);
+  const info = Api.markPrinted(r.round_id, 'form', ss);
+  assert.ok(info.form_printed_at);
+  assert.equal(Api.state(null, ss).round.form_printed_at, info.form_printed_at);
+  const busy = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Busy tab');
+  const ex = Api.createExtraRequest([{ drug_id: busy.drug_id, qty: 1 }], '', ss);
+  assert.throws(() => Api.markPrinted(ex.round_id, 'form', ss), /ใบเบิกพิเศษ/);
+});
+
 test('counting a drug fetched from OPD: count only, nothing requested; latest count in state', () => {
   const ss = setup();
   const r = Api.startRound(ss);

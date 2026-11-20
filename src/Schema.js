@@ -83,7 +83,9 @@ var Schema = (function () {
         ['received_by', 'string'],
         ['req_no', 'string'],     // ใบเบิก number, given at approval (บ.69/0001)
         ['receipt_no', 'string'], // ใบรับ number, given when the delivery check is confirmed (ร.69/0001)
-        ['kind', 'string']        // '' = the 2-week round; EXTRA = ใบเบิกพิเศษ (extra request, no count)
+        ['kind', 'string'],       // '' = the 2-week round; EXTRA = ใบเบิกพิเศษ (extra request, no count)
+        ['count_printed_at', 'datetime'], // last time the count sheet was printed for this round (step 2)
+        ['form_printed_at', 'datetime']   // last time the approved ใบเบิก was printed (step 6)
       ])
     },
     RoundLines: {

@@ -79,7 +79,7 @@
     margin-left: auto; font-size: 12px; min-width: 20px; text-align: center; border-radius: 999px; padding: 0 6px;
     background: var(--danger-soft); color: var(--danger);
   }
-  .nav-group { margin: 10px 10px 2px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .nav-group { margin: 22px 10px 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
   .me { border-top: 1px solid var(--line); padding: 10px 8px 0; display: grid; gap: 4px; }
   .link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
   .main { padding: 16px 20px 48px; max-width: 1180px; width: 100%; margin: 0 auto; }
@@ -262,14 +262,23 @@
   .tile.danger b { color: var(--danger); }
   .tile.warn b { color: var(--warn); }
   .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; counter-reset: step; }
-  .steps li {
-    counter-increment: step; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+  /* each step is a button: done = green ✓, the next one = accent border + ถัดไป */
+  .steps li { display: flex; }
+  .steps .step {
+    flex: 1; font: inherit; color: inherit; text-align: left; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
     display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+    transition: border-color .12s, box-shadow .12s, background .12s;
   }
-  .steps li::before { content: '\0E02\0E31\0E49\0E19\0E17\0E35\0E48  ' counter(step); font-size: 12px; color: var(--muted); }
-  .steps li.done { border-color: var(--ok); background: var(--ok-soft); }
-  .steps li.done::before { content: '\2713  ' counter(step); color: var(--ok); font-weight: 600; }
+  .steps .step:hover { border-color: var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .08); }
+  .steps .step:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .steps .step-no { font-size: 12px; color: var(--muted); }
+  .steps li.done .step { border-color: var(--ok); background: var(--ok-soft); }
+  .steps li.done .step-no { color: var(--ok); font-weight: 600; }
+  .steps li.next .step { border: 2px solid var(--accent); background: var(--accent-soft); padding: 7px 9px; }
+  .steps li.next .step-no { color: var(--accent); font-weight: 700; }
   .step-name { font-weight: 600; }
+  .step-name .ic { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
 
   /* ---------- medicines + stock card ---------- */
   .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
