@@ -143,18 +143,21 @@
           <div class="card">
             <h2>ใบเบิกพิเศษ เบิกเพิ่มจากคลัง</h2>
             <p class="muted small">ใช้เมื่อต้องการเบิกจากคลังเพิ่มระหว่างรอบ 2 สัปดาห์ ไม่ต้องนับ ไม่ต้องอนุมัติ
-              ค้นหายา ใส่จำนวนที่จะเบิก (หน่วยตามที่เบิก) แล้วกด บันทึกและพิมพ์ใบเบิก ระบบออกเลขใบเบิกให้ทันที
-              เมื่อได้ยาแล้ว ตรวจรับที่เมนู ตรวจรับยา เหมือนใบเบิกรอบปกติ</p>
-            <div class="row">
-              <input type="search" id="ex-search" placeholder="ค้นหายา" aria-label="ค้นหายา">
-              <button class="btn" id="btn-ex-clear" type="button">ล้างที่ใส่</button>
+              พิมพ์ชื่อยาในช่อง เพิ่มยา แล้วกด Enter หรือคลิกชื่อยา ใส่จำนวน (หน่วยตามที่เบิก) แล้วกด Enter เพื่อเพิ่มยาตัวถัดไป
+              ครบแล้วกด บันทึกและพิมพ์ใบเบิก (กดสองครั้งเพื่อยืนยัน) ระบบออกเลขใบเบิกให้ทันที เมื่อได้ยาแล้ว ตรวจรับที่เมนู ตรวจรับยา</p>
+            <div id="ex-lines"></div>
+            <div class="ex-add">
+              <label class="field" for="ex-search">เพิ่มยา</label>
+              <input type="search" id="ex-search" role="combobox" aria-autocomplete="list" aria-expanded="false"
+                aria-controls="ex-suggest" autocomplete="off" placeholder="พิมพ์ชื่อยา แล้วกด Enter หรือคลิกเลือก">
+              <ul id="ex-suggest" class="suggest" role="listbox" aria-label="ยาที่ค้นพบ" hidden></ul>
             </div>
-            <div id="ex-list"></div>
             <div class="row">
               <label class="field grow">เหตุผล (ไม่บังคับ)<input type="text" id="ex-note" placeholder="เช่น ผู้ป่วยใหม่ใช้ยานี้มาก"></label>
             </div>
             <div class="row">
               <button class="btn primary" id="btn-save-ex" type="button" data-icon="printer">บันทึกและพิมพ์ใบเบิก</button>
+              <button class="btn" id="btn-ex-clear" type="button">ล้างรายการ</button>
               <span id="ex-summary" class="muted small"></span>
             </div>
           </div>

@@ -31,8 +31,7 @@
     opdQty: {},           // drug_id -> qty typed
     opdFilter: '',
     opdAll: false,        // OPD list also shows main-storage drugs (urgent fetch)
-    exQty: {},            // ใบเบิกพิเศษ: drug_id -> qty typed
-    exFilter: '',
+    exLines: [],          // ใบเบิกพิเศษ being written: [{drug_id, qty}] in the order added
     recvQty: {},          // doc key ('MAIN:'+round_id / 'OPD:'+request_id) -> {drug_id -> received qty typed, not saved}
     recvSel: null,        // doc key of the ใบเบิก being checked
     recvExp: {},          // 'main' or request_id -> {drug_id -> [expiry dates]} not yet saved
@@ -196,15 +195,21 @@
   }
 
   // Two-click button for actions that can't be undone.
+  // confirmText may be a function, worked out on the first click; returning '' refuses to arm
+  // (the function tells staff why). The button looks normal again before the action runs.
   function armed(btn, confirmText, action) {
-    var label = btn.textContent, on = false, t;
+    var label = btn.innerHTML, on = false, t;
+    function reset() { on = false; btn.classList.remove('armed'); btn.innerHTML = label; }
     btn.onclick = function () {
       if (!on) {
-        on = true; btn.classList.add('armed'); btn.textContent = typeof confirmText === 'function' ? confirmText() : confirmText;
-        t = setTimeout(function () { on = false; btn.classList.remove('armed'); btn.textContent = label; }, 5000);
+        var text = typeof confirmText === 'function' ? confirmText() : confirmText;
+        if (!text) return;
+        on = true; btn.classList.add('armed'); btn.textContent = text;
+        t = setTimeout(reset, 5000);
         return;
       }
       clearTimeout(t);
+      reset();
       action(btn);
     };
   }
@@ -1602,45 +1607,148 @@
   function extraDrugs() {
     return S.state.drugs.filter(function (d) { return d.stocked || d.source === 'OPD'; }).sort(byName);
   }
-  function extraLines() {
-    return extraDrugs().map(function (d) { return { d: d, qty: num(S.exQty[d.drug_id]) }; })
-      .filter(function (x) { return x.qty > 0; });
+  // The lines being written, in the order added: [{drug_id, qty}] (qty as typed). Kept in this
+  // browser until saved, so a half-written ใบเบิก survives a reload.
+  function exLinesNow() {
+    var dm = drugMap();
+    return S.exLines.filter(function (l) { return dm[l.drug_id]; });
   }
+  function storeEx() { store('exLines', S.exLines); }
   function extraDocs() {
     return (S.state.main_docs || []).filter(function (d) { return d.kind === 'EXTRA'; });
   }
+
   function renderExtra() {
     if (!S.state) return;
-    var q = S.exFilter.trim().toLowerCase();
-    var chosen = extraLines();
-    // typed lines stay on top; the rest only once something is searched
-    var typed = {};
-    chosen.forEach(function (x) { typed[x.d.drug_id] = true; });
-    var found = q ? extraDrugs().filter(function (d) {
-      return !typed[d.drug_id] && (d.name + ' ' + d.hosxp_name + ' ' + d.strength + ' ' + d.item_code).toLowerCase().indexOf(q) >= 0;
-    }).slice(0, 50) : [];
-    function row(d) {
-      var c = d.last_count;
-      return '<tr><td>' + esc(drugLabel(d)) + (d.source === 'OPD' ? ' <span class="badge">ปกติขอ OPD</span>' : '') +
-        (lowNow(d) ? ' <span class="badge danger">ต่ำกว่าขั้นต่ำ</span>' : '') + '</td><td>' + esc(d.unit) + '</td>' +
-        '<td class="num">' + (c ? fmt(c.qty) + ' <span class="muted small">' + thDate(c.date) + '</span>' : '<span class="muted">–</span>') + '</td>' +
-        '<td style="width:96px"><input type="number" min="0" step="1" inputmode="numeric" data-exq="' + esc(d.drug_id) + '" value="' +
-        esc(S.exQty[d.drug_id] === undefined ? '' : S.exQty[d.drug_id]) + '" aria-label="จำนวนที่จะเบิก ' + esc(d.name) + '"></td></tr>';
-    }
-    var list = chosen.map(function (x) { return x.d; }).concat(found);
-    $('ex-list').innerHTML = list.length ? '<div class="table-wrap"><table class="plain"><thead><tr><th>ยา</th><th>หน่วย</th>' +
-      '<th class="num">คงเหลือ (นับล่าสุด)</th><th class="num">จะเบิก</th></tr></thead><tbody>' + list.map(row).join('') + '</tbody></table></div>' +
-      (q && !found.length ? '<p class="muted small">ไม่พบยาที่ค้นหา</p>' : '')
-      : '<p class="muted small">' + (q ? 'ไม่พบยาที่ค้นหา' : 'พิมพ์ชื่อยาในช่องค้นหา แล้วใส่จำนวนที่จะเบิก') + '</p>';
-    $('ex-summary').textContent = chosen.length ? 'จะเบิก ' + chosen.length + ' รายการ' : '';
-    each('[data-exq]', $('ex-list'), function (inp) {
-      inp.oninput = function () {
-        S.exQty[this.getAttribute('data-exq')] = this.value;
-        store('exQty', S.exQty);
-        $('ex-summary').textContent = extraLines().length ? 'จะเบิก ' + extraLines().length + ' รายการ' : '';
-      };
-    });
+    var dm = drugMap(), lines = exLinesNow();
+    $('ex-lines').innerHTML = lines.length
+      ? '<div class="table-wrap"><table class="plain ex-lines"><thead><tr><th>#</th><th>ยา</th><th>หน่วย</th>' +
+        '<th class="num">คงเหลือ (นับล่าสุด)</th><th class="num">จะเบิก</th><th></th></tr></thead><tbody>' +
+        lines.map(function (l, i) {
+          var d = dm[l.drug_id], c = d.last_count;
+          return '<tr data-exrow="' + esc(l.drug_id) + '"><td>' + (i + 1) + '</td><td>' + esc(drugLabel(d)) +
+            (d.source === 'OPD' ? ' <span class="badge">ปกติขอ OPD</span>' : '') +
+            (lowNow(d) ? ' <span class="badge danger">ต่ำกว่าขั้นต่ำ</span>' : '') + '</td><td>' + esc(d.unit) + '</td>' +
+            '<td class="num">' + (c ? fmt(c.qty) + ' <span class="muted small">' + thDate(c.date) + '</span>' : '<span class="muted">–</span>') + '</td>' +
+            '<td style="width:96px"><input type="number" min="0" step="1" inputmode="numeric" data-exq="' + esc(l.drug_id) + '" value="' +
+            esc(l.qty) + '" aria-label="จำนวนที่จะเบิก ' + esc(d.name) + '"></td>' +
+            '<td><button type="button" class="x" data-exrm="' + esc(l.drug_id) + '" aria-label="เอา ' + esc(d.name) + ' ออก">×</button></td></tr>';
+        }).join('') + '</tbody></table></div>'
+      : '<p class="muted small">ยังไม่มีรายการ เพิ่มยาจากช่อง เพิ่มยา ด้านล่าง</p>';
+    exSummary();
     renderExtraHistory();
+  }
+  function exSummary() {
+    var lines = exLinesNow();
+    var blank = lines.filter(function (l) { return !(num(l.qty) > 0); }).length;
+    $('ex-summary').innerHTML = lines.length ? esc(lines.length + ' รายการ') +
+      (blank ? ' · <span class="danger-text">ยังไม่ใส่จำนวน ' + blank + '</span>' : '') : '';
+  }
+
+  // Search box: suggestions while typing; ↑/↓ to move, Enter or click to add, Esc to close.
+  var exActive = 0;
+  function exMatches() {
+    var q = $('ex-search').value.trim().toLowerCase();
+    if (!q) return [];
+    var have = {};
+    S.exLines.forEach(function (l) { have[l.drug_id] = true; });
+    var hits = extraDrugs().filter(function (d) {
+      return !have[d.drug_id] && (d.name + ' ' + d.hosxp_name + ' ' + d.strength + ' ' + d.item_code).toLowerCase().indexOf(q) >= 0;
+    });
+    hits.sort(function (x, y) { // names starting with what was typed first
+      var a = x.name.toLowerCase().indexOf(q) === 0 ? 0 : 1, b = y.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+      return a - b || x.name.localeCompare(y.name);
+    });
+    return hits.slice(0, 8);
+  }
+  function renderSuggest() {
+    var box = $('ex-suggest'), input = $('ex-search'), hits = exMatches();
+    var q = input.value.trim();
+    if (!q) { box.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); return; }
+    if (exActive >= hits.length) exActive = 0;
+    box.innerHTML = hits.length ? hits.map(function (d, i) {
+      var c = d.last_count;
+      return '<li role="option" id="exs-' + i + '" data-exadd="' + esc(d.drug_id) + '" aria-selected="' + (i === exActive) + '"' +
+        (i === exActive ? ' class="active"' : '') + '><span>' + esc(drugLabel(d)) + '</span><span class="muted small">' + esc(d.unit) +
+        (c ? ' · คงเหลือ ' + fmt(c.qty) : '') + (d.source === 'OPD' ? ' · ปกติขอ OPD' : '') + '</span></li>';
+    }).join('') : '<li class="none muted small">ไม่พบยา หรือเพิ่มไว้แล้ว</li>';
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    if (hits.length) input.setAttribute('aria-activedescendant', 'exs-' + exActive); else input.removeAttribute('aria-activedescendant');
+  }
+  function addExtra(id) {
+    var have = S.exLines.filter(function (l) { return l.drug_id === id; })[0];
+    if (!have) { S.exLines.push({ drug_id: id, qty: '' }); storeEx(); }
+    $('ex-search').value = ''; exActive = 0; renderSuggest();
+    renderExtra();
+    var q = $('ex-lines').querySelector('input[data-exq="' + id + '"]');
+    if (q) { q.focus(); q.select(); }
+  }
+  function wireExtra() {
+    var input = $('ex-search'), box = $('ex-suggest');
+    input.oninput = function () { exActive = 0; renderSuggest(); };
+    input.onkeydown = function (e) {
+      var hits = exMatches();
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!hits.length) return;
+        exActive = (exActive + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length;
+        renderSuggest();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (hits.length) addExtra(hits[Math.min(exActive, hits.length - 1)].drug_id);
+        else if (input.value.trim()) toast('ไม่พบยา "' + input.value.trim() + '" หรือเพิ่มไว้แล้ว', true);
+      } else if (e.key === 'Escape') {
+        input.value = ''; renderSuggest();
+      }
+    };
+    input.onblur = function () { // close once focus has really left (Enter-Enter can bring it straight back)
+      setTimeout(function () {
+        if (document.activeElement === input) return;
+        box.hidden = true; input.setAttribute('aria-expanded', 'false');
+      }, 150);
+    };
+    input.onfocus = function () { if (input.value.trim()) renderSuggest(); };
+    box.onmousedown = function (e) { e.preventDefault(); }; // keep focus in the search box while clicking
+    box.onclick = function (e) {
+      var li = e.target.closest('[data-exadd]');
+      if (li) addExtra(li.getAttribute('data-exadd'));
+    };
+    var lines = $('ex-lines');
+    lines.oninput = function (e) {
+      var id = e.target.getAttribute('data-exq');
+      if (!id) return;
+      S.exLines.forEach(function (l) { if (l.drug_id === id) l.qty = e.target.value; });
+      storeEx(); exSummary();
+      e.target.closest('tr').classList.remove('need');
+    };
+    lines.onkeydown = function (e) { // Enter in a quantity: on to the next medicine
+      if (e.key === 'Enter' && e.target.hasAttribute('data-exq')) { e.preventDefault(); input.focus(); }
+    };
+    lines.onclick = function (e) {
+      var b = e.target.closest('[data-exrm]');
+      if (!b) return;
+      var id = b.getAttribute('data-exrm');
+      S.exLines = S.exLines.filter(function (l) { return l.drug_id !== id; });
+      storeEx(); renderExtra(); input.focus();
+    };
+    armed($('btn-ex-clear'), 'กดอีกครั้งเพื่อล้างรายการ', function () {
+      S.exLines = []; storeEx(); $('ex-note').value = ''; renderExtra(); input.focus();
+    });
+    // Save: first click checks the list and turns the button red to confirm; second click saves.
+    armed($('btn-save-ex'), function () {
+      var lines = exLinesNow();
+      if (!lines.length) { toast('ยังไม่มีรายการ พิมพ์ชื่อยาในช่อง เพิ่มยา', true); input.focus(); return ''; }
+      var blank = lines.filter(function (l) { return !(num(l.qty) > 0); });
+      if (blank.length) {
+        toast('ยังไม่ได้ใส่จำนวน ' + blank.length + ' รายการ', true);
+        blank.forEach(function (l) { var tr = $('ex-lines').querySelector('[data-exrow="' + l.drug_id + '"]'); if (tr) tr.classList.add('need'); });
+        var q = $('ex-lines').querySelector('input[data-exq="' + blank[0].drug_id + '"]');
+        if (q) q.focus();
+        return '';
+      }
+      return 'กดอีกครั้งเพื่อยืนยัน บันทึกใบเบิกพิเศษ ' + lines.length + ' รายการ';
+    }, saveExtra);
   }
 
   function renderExtraHistory() {
@@ -1659,14 +1767,13 @@
     each('[data-exprint]', box, function (b) { b.onclick = function () { printExtra(b.getAttribute('data-exprint')); }; });
   }
 
-  function saveExtra() {
-    var lines = extraLines();
-    if (!lines.length) { toast('ยังไม่ได้ใส่จำนวนที่จะเบิก', true); return; }
-    var btn = $('btn-save-ex');
+  function saveExtra(btn) {
+    var lines = exLinesNow();
+    if (!lines.length) return;
     btn.disabled = true;
-    api('apiCreateExtraRequest', lines.map(function (x) { return { drug_id: x.d.drug_id, qty: x.qty }; }), $('ex-note').value).then(function (doc) {
+    api('apiCreateExtraRequest', lines.map(function (l) { return { drug_id: l.drug_id, qty: num(l.qty) }; }), $('ex-note').value).then(function (doc) {
       replaceMainDoc(doc);
-      S.exQty = {}; store('exQty', {}); $('ex-note').value = '';
+      S.exLines = []; storeEx(); $('ex-note').value = '';
       btn.disabled = false;
       renderExtra(); renderReceive(); renderShell(); renderHome();
       toast('บันทึกแล้ว ใบเบิกเลขที่ ' + doc.req_no + ' เมื่อได้ยาให้ตรวจรับที่เมนู ตรวจรับยา');
@@ -2057,9 +2164,7 @@
       renderOpd();
     };
     $('btn-save-opd').onclick = saveOpdRequest;
-    $('ex-search').oninput = function () { S.exFilter = this.value; renderExtra(); };
-    $('btn-ex-clear').onclick = function () { S.exQty = {}; store('exQty', {}); renderExtra(); };
-    $('btn-save-ex').onclick = saveExtra;
+    wireExtra();
     $('btn-copy-opd').onclick = function () {
       var rows = [['ลำดับ', 'รายการ', 'จำนวน', 'หน่วย', 'หมายเหตุ']].concat(opdLines().map(function (x, i) {
         return [i + 1, drugLabel(x.d), x.qty, x.d.unit, 'IPD'];
@@ -2102,7 +2207,12 @@
   S.opdQty = load('opdQty', {});
   S.reqMode = load('reqMode', 'main');
   if (['main', 'opd', 'extra'].indexOf(S.reqMode) < 0) S.reqMode = 'main';
-  S.exQty = load('exQty', {});
+  S.exLines = load('exLines', null);
+  if (!Array.isArray(S.exLines)) { // quantities typed in the earlier search-table version
+    var oldEx = load('exQty', {});
+    S.exLines = Object.keys(oldEx).filter(function (k) { return num(oldEx[k]) > 0; }).map(function (k) { return { drug_id: k, qty: oldEx[k] }; });
+    forget('exQty');
+  }
   S.token = load('token', null);
   addIcons(document);
   each('.pl-about-open', null, function (b) {

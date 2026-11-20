@@ -104,6 +104,16 @@
   .field { display: grid; gap: 4px; font-size: 14px; font-weight: 600; }
   .field input, .field select { font-weight: 400; width: 100%; }
   .field.grow { flex: 1 1 280px; }
+  /* ใบเบิกพิเศษ: one line per medicine, added from a search box with suggestions */
+  .ex-add { position: relative; display: grid; gap: 4px; margin: 12px 0; max-width: 520px; }
+  .ex-add input { width: 100%; }
+  .suggest { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; list-style: none; margin: 2px 0 0; padding: 4px 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .12);
+    max-height: 320px; overflow-y: auto; }
+  .suggest li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; cursor: pointer; }
+  .suggest li.active, .suggest li[data-exadd]:hover { background: var(--accent-soft); }
+  .suggest li.none { cursor: default; }
+  table.ex-lines tr.need input { border-color: var(--danger); background: var(--danger-soft); }
   .field input[readonly] { background: var(--bg); color: var(--muted); }
   .card {
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
