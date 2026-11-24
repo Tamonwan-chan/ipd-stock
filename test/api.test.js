@@ -363,6 +363,63 @@ test('OPD requests: ใบเบิก number when saved, draft receive, confirm
   assert.throws(() => Api.saveOpdReceived(req.request_id, [{ drug_id: busy.drug_id, received_qty: 1 }], ss), /ไม่อยู่ในรายการ/);
 });
 
+test('OPD counts: typed on the OPD page any day, no round needed; latest count and stock card', () => {
+  const ss = setup();
+  ss.sheets = ss.sheets.filter(sh => sh.name !== 'OpdCounts'); // Sheet from before 24 Nov
+  let st = Api.state(null, ss);
+  assert.equal(st.round, null);
+  const slow = st.drugs.find(x => x.hosxp_name === 'Slow tab');
+  const busy = st.drugs.find(x => x.hosxp_name === 'Busy tab');
+  assert.equal(slow.opd_count, null);
+
+  const today = st.today;
+  let saved = Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: '4' }], ss);
+  assert.deepEqual(saved, { [slow.drug_id]: { opd_count: { qty: 4, date: today }, last_count: { qty: 4, date: today } } });
+  saved = Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: 3 }], ss); // same day: replaced, not added
+  assert.deepEqual(saved[slow.drug_id].opd_count, { qty: 3, date: today });
+  assert.equal(Db.readTable('OpdCounts', ss).length, 1);
+  st = Api.state(null, ss);
+  let s = st.drugs.find(x => x.drug_id === slow.drug_id);
+  assert.deepEqual([s.opd_count, s.last_count], [{ qty: 3, date: today }, { qty: 3, date: today }]);
+
+  // an older day's count shows again when today's is cleared
+  Db.appendRows('OpdCounts', [{ count_date: '2026-08-20', drug_id: slow.drug_id, qty: 9, counted_by: 'x', counted_at: '2026-08-20 09:00' }], ss);
+  assert.deepEqual(Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: '' }], ss)[slow.drug_id],
+    { opd_count: { qty: 9, date: '2026-08-20' }, last_count: { qty: 9, date: '2026-08-20' } });
+  Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: 0 }], ss);
+
+  assert.throws(() => Api.saveOpdCounts([{ drug_id: busy.drug_id, qty: 1 }], ss), /เบิกจากคลัง/);
+  assert.throws(() => Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: -1 }], ss), /ไม่ถูกต้อง/);
+  assert.throws(() => Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: 'abc' }], ss), /ไม่ถูกต้อง/);
+  assert.throws(() => Api.saveOpdCounts([{ drug_id: 'D999', qty: 1 }], ss), /ไม่พบยา/);
+
+  // logged once, with the request
+  assert.equal(Db.readTable('ChangeLog', ss).filter(l => l.action === 'นับคงเหลือยา OPD').length, 0);
+  Api.createOpdRequest('MONTHLY', [{ drug_id: slow.drug_id, qty: 15 }], '', ss);
+  const log = Db.readTable('ChangeLog', ss).filter(l => l.action === 'นับคงเหลือยา OPD');
+  assert.equal(log.length, 1);
+  assert.match(log[0].detail, /Slow tab.* 0$/);
+
+  const hist = Api.drugCard(slow.drug_id, ss).history.filter(h => h.type === 'OPD_COUNT');
+  assert.deepEqual(hist.map(h => [h.date, h.on_hand]), [[today, 0], ['2026-08-20', 9]]);
+  st = Api.state(null, ss);
+  assert.deepEqual(st.drugs.find(x => x.drug_id === slow.drug_id).last_count, { qty: 0, date: today });
+  assert.deepEqual(JSON.parse(JSON.stringify(st)), st);
+});
+
+test('OPD counts: a count typed on the OPD page wins over a round count the same day', () => {
+  const ss = setup();
+  const r = Api.startRound(ss);
+  const slow = Api.state(null, ss).drugs.find(x => x.hosxp_name === 'Slow tab');
+  Api.saveLines(r.round_id, [{ drug_id: slow.drug_id, on_hand: 8 }], ss); // older pages counted OPD drugs in the round
+  assert.equal(Api.state(null, ss).drugs.find(x => x.drug_id === slow.drug_id).last_count.qty, 8);
+  Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: 2 }], ss);
+  assert.equal(Api.state(null, ss).drugs.find(x => x.drug_id === slow.drug_id).last_count.qty, 2);
+  // cleared on the OPD page: the round's count is the latest again
+  assert.deepEqual(Api.saveOpdCounts([{ drug_id: slow.drug_id, qty: '' }], ss)[slow.drug_id],
+    { opd_count: null, last_count: { qty: 8, date: r.round_id } });
+});
+
 test('ใบเบิกพิเศษ: number when saved, checked like a round, kept off the count page, cancel', () => {
   const ss = setup();
   Api.setActor('Nurse A');
