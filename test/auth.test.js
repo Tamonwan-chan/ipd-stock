@@ -56,8 +56,31 @@ test('login: wrong password, unknown user, and a pause after 5 failures', () => 
   const { ss } = setup();
   assert.throws(() => Auth.login('boss', 'nope', ss), /ไม่ถูกต้อง/);
   assert.throws(() => Auth.login('nobody', 'secret1', ss), /ไม่ถูกต้อง/);
-  for (let i = 0; i < 4; i++) assert.throws(() => Auth.login('boss', 'x', ss), /ไม่ถูกต้อง/);
-  assert.throws(() => Auth.login('boss', 'secret1', ss), /รอ 10 นาที/); // 5 wrong in a row
+  assert.throws(() => Auth.login('boss', 'x', ss), /ไม่ถูกต้อง$/); // 2nd wrong
+  assert.throws(() => Auth.login('boss', 'x', ss), /ผิดได้อีก 2 ครั้ง/);
+  assert.throws(() => Auth.login('boss', 'x', ss), /ผิดได้อีก 1 ครั้ง/); // 4th wrong
+  assert.throws(() => Auth.login('boss', 'x', ss), /ถูกพักไว้ 10 นาที/); // 5th wrong
+  assert.throws(() => Auth.login('boss', 'secret1', ss), /ถูกพักไว้ 10 นาที/); // right password, still paused
+  // an admin setting a new password lifts the pause
+  Auth.saveUser({ username: 'boss', name: 'Admin Person', role: 'admin', active: true, password: 'secret2' }, ss);
+  assert.ok(Auth.login('boss', 'secret2', ss).token);
+});
+
+test('login: failures carry a reason for the change log, never the password', () => {
+  const { ss } = setup();
+  const err = fn => { try { fn(); } catch (e) { return e; } assert.fail('no error'); };
+  assert.deepEqual([err(() => Auth.login('boss', 'nope', ss))].map(e => [e.reason, e.who])[0], ['รหัสผ่านไม่ถูกต้อง (ครั้งที่ 1)', 'boss']);
+  assert.deepEqual([err(() => Auth.login('secret1', 'x', ss))].map(e => [e.reason, e.who])[0], ['ไม่พบชื่อผู้ใช้', '']);
+});
+
+test('login: a password typed with the Thai keyboard is explained and not counted toward the pause', () => {
+  const { ss } = setup();
+  Auth.saveUser({ username: 'nurse', name: 'Staff One', role: 'staff', active: true, password: '123456' }, ss);
+  for (let i = 0; i < 6; i++) assert.throws(() => Auth.login('nurse', 'ๅ/-ภถุ', ss), /ตัวอักษรไทย/); // "123456" in Thai mode
+  assert.ok(Auth.login('nurse', '123456', ss).token);
+  // new passwords can't contain Thai (set while the keyboard was in Thai mode by mistake)
+  assert.throws(() => Auth.saveUser({ username: 'nurse2', role: 'staff', password: 'ๅ/-ภถุ' }, ss), /ตัวอักษรไทย/);
+  assert.throws(() => Auth.changePassword('nurse', '123456', 'ๅ/-ภถุ', ss), /ตัวอักษรไทย/);
 });
 
 test('login: no users yet tells how to create the first admin', () => {

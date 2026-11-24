@@ -140,6 +140,51 @@ test('round: start, save lines (server recomputes), reopen same round, approve l
   assert.equal(Api.state(r.round_id, ss).round.round_id, r.round_id); // pick an older round
 });
 
+test('HOSxP data per round: the imported file is shown now and kept on the round at approval', () => {
+  const ss = setup(); // imports 1–28 Aug
+  let st = Api.state(null, ss);
+  assert.deepEqual([st.data.import_from, st.data.import_to], ['2026-08-01', '2026-08-28']);
+  assert.match(st.data.import_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.deepEqual([st.data.data_from, st.data.data_to], [st.usage.from, st.usage.to]);
+  const r = Api.startRound(ss);
+  assert.equal(Api.state(null, ss).round.import_to, ''); // open round: the page shows the current data
+  Api.approveRound(r.round_id, ss);
+  assert.deepEqual([Api.state(r.round_id, ss).round.import_from, Api.state(r.round_id, ss).round.import_to], ['2026-08-01', '2026-08-28']);
+  // the next file opens the next round; the approved round keeps its own dates
+  Api.importFile([[2, '29/8/2026', 'Busy tab', '10 mg.', 'เม็ด', 10, 1], [3, '4/9/2026', 'Busy tab', '10 mg.', 'เม็ด', 10, 1]], ss);
+  st = Api.state(null, ss);
+  assert.deepEqual([st.data.import_from, st.data.import_to], ['2026-08-29', '2026-09-04']);
+  assert.equal(Api.state(r.round_id, ss).round.import_to, '2026-08-28');
+  assert.equal(Api.state(r.round_id, ss).round.data_to, '2026-08-28');
+  assert.deepEqual(JSON.parse(JSON.stringify(st)), st);
+});
+
+test('HOSxP data: an import made before the Settings rows existed is read from the change log', () => {
+  const ss = setup();
+  const sh = ss.getSheetByName('Settings');
+  const keyCol = sh.grid[0].indexOf('key');
+  sh.grid = sh.grid.filter((row, i) => i === 0 || !/^import_/.test(String(row[keyCol])));
+  const d = Api.state(null, ss).data;
+  assert.deepEqual([d.import_from, d.import_to], ['2026-08-01', '2026-08-28']);
+});
+
+test('importFile: after the last round is approved, a new import opens the next round', () => {
+  const ss = setup();
+  const rows = [[2, '29/8/2026', 'Busy tab', '10 mg.', 'เม็ด', 10, 1]];
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // no round yet: the page offers "start"
+  const r = Api.startRound(ss);
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // a round is open: keep it
+  assert.equal(Api.state(null, ss).round.round_id, r.round_id);
+  Api.approveRound(r.round_id, ss);
+  const next = Api.importFile(rows, ss).newRound;
+  assert.equal(next.status, 'COUNTING');
+  assert.notEqual(next.round_id, r.round_id);
+  const st = Api.state(null, ss);
+  assert.equal(st.round.round_id, next.round_id); // the count page shows the new round
+  assert.deepEqual(st.rounds.map(x => x.status), ['COUNTING', 'APPROVED']);
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // only one open round
+});
+
 // Simulate a Sheet set up before a column existed: remove it from the tab.
 function dropColumn(ss, tab, name) {
   const sh = ss.getSheetByName(tab);
