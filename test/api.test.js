@@ -140,6 +140,23 @@ test('round: start, save lines (server recomputes), reopen same round, approve l
   assert.equal(Api.state(r.round_id, ss).round.round_id, r.round_id); // pick an older round
 });
 
+test('importFile: after the last round is approved, a new import opens the next round', () => {
+  const ss = setup();
+  const rows = [[2, '29/8/2026', 'Busy tab', '10 mg.', 'เม็ด', 10, 1]];
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // no round yet: the page offers "start"
+  const r = Api.startRound(ss);
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // a round is open: keep it
+  assert.equal(Api.state(null, ss).round.round_id, r.round_id);
+  Api.approveRound(r.round_id, ss);
+  const next = Api.importFile(rows, ss).newRound;
+  assert.equal(next.status, 'COUNTING');
+  assert.notEqual(next.round_id, r.round_id);
+  const st = Api.state(null, ss);
+  assert.equal(st.round.round_id, next.round_id); // the count page shows the new round
+  assert.deepEqual(st.rounds.map(x => x.status), ['COUNTING', 'APPROVED']);
+  assert.equal(Api.importFile(rows, ss).newRound, undefined); // only one open round
+});
+
 // Simulate a Sheet set up before a column existed: remove it from the tab.
 function dropColumn(ss, tab, name) {
   const sh = ss.getSheetByName(tab);

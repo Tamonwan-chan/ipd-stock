@@ -79,6 +79,7 @@ var Auth = (function () {
 
   function checkPassword_(pw) {
     if (String(pw || '').length < MIN_PASSWORD) throw new Error('รหัสผ่านต้องยาวอย่างน้อย ' + MIN_PASSWORD + ' ตัวอักษร');
+    if (THAI.test(String(pw))) throw new Error('รหัสผ่านมีตัวอักษรไทย ใช้ได้เฉพาะภาษาอังกฤษ ตัวเลข และเครื่องหมาย (แป้นพิมพ์อาจเป็นภาษาไทยอยู่)');
   }
   function checkUsername_(n) {
     if (!/^[^\s]{2,30}$/.test(n)) throw new Error('ชื่อผู้ใช้ 2–30 ตัวอักษร ไม่มีช่องว่าง');
@@ -88,17 +89,42 @@ var Auth = (function () {
    * Sign in. Returns a session token and the user.
    * @return {{token:string, user:{username,name,role}}}
    */
+  // Thai letters and digits. A password typed while the keyboard is in Thai mode comes out in
+  // Thai ("123456" → "ๅ/-ภถุ"); the login field hides it, so staff can't see why it fails.
+  var THAI = /[฀-๿]/;
+
+  /** A failed login: `reason` (Thai) and `who` (a real username, or '') go to the change log. */
+  function failure_(message, reason, who) {
+    var e = new Error(message);
+    e.reason = reason;
+    e.who = who || '';
+    return e;
+  }
+
   function login(username, password, ss) {
     var dp = deps_(), D = db_();
     var n = normName(username);
+    var pw = String(password === null || password === undefined ? '' : password);
     var failKey = 'fail:' + n;
     var fails = +(dp.cache.get(failKey) || 0);
-    if (fails >= MAX_FAILS) throw new Error('ใส่รหัสผิดหลายครั้ง รอ 10 นาทีแล้วลองใหม่');
     if (!users_(ss).length) throw new Error('ยังไม่มีผู้ใช้ในระบบ ผู้ดูแลระบบสร้างบัญชีแรกจากเมนู IPD ในชีต');
     var u = n ? find_(n, ss) : null;
-    if (!u || !u.active || !u.pw_hash || hash(String(password || ''), u.pw_salt) !== u.pw_hash) {
+    var who = u ? normName(u.username) : '';
+    if (fails >= MAX_FAILS) {
+      throw failure_('ใส่รหัสผิด ' + MAX_FAILS + ' ครั้งติดกัน ชื่อผู้ใช้นี้ถูกพักไว้ 10 นาที รอแล้วลองใหม่ หรือให้ผู้ดูแลระบบตั้งรหัสผ่านใหม่',
+        'ถูกพัก 10 นาที (ใส่รหัสผิด ' + MAX_FAILS + ' ครั้ง)', who);
+    }
+    if (!u || !u.active || !u.pw_hash || hash(pw, u.pw_salt) !== u.pw_hash) {
+      // Thai keyboard: say so, and don't count it toward the pause.
+      if (THAI.test(pw)) {
+        throw failure_('รหัสผ่านที่พิมพ์เป็นตัวอักษรไทย แป้นพิมพ์น่าจะเป็นภาษาไทยอยู่ ' +
+          'เปลี่ยนเป็นภาษาอังกฤษ (กดปุ่ม ~ หรือ Alt+Shift) แล้วพิมพ์รหัสผ่านใหม่', 'พิมพ์รหัสผ่านขณะแป้นพิมพ์เป็นภาษาไทย', who);
+      }
       dp.cache.put(failKey, String(fails + 1), LOCK_SECONDS);
-      throw new Error('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+      var left = MAX_FAILS - fails - 1;
+      throw failure_('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' +
+        (left <= 2 ? (left > 0 ? ' (ผิดได้อีก ' + left + ' ครั้ง แล้วจะถูกพัก 10 นาที)' : ' ชื่อผู้ใช้นี้ถูกพักไว้ 10 นาที') : ''),
+        !u ? 'ไม่พบชื่อผู้ใช้' : !u.active ? 'บัญชีปิดใช้งาน' : 'รหัสผ่านไม่ถูกต้อง (ครั้งที่ ' + (fails + 1) + ')', who);
     }
     dp.cache.remove(failKey);
     var token = dp.uuid() + dp.uuid();
@@ -178,6 +204,7 @@ var Auth = (function () {
       row.pw_hash = hash(pw, row.pw_salt);
       fields.push('pw_salt', 'pw_hash');
       changes.push('ตั้งรหัสผ่านใหม่');
+      dp.cache.remove('fail:' + n); // a new password also lifts a pause after wrong passwords
     }
     D.updateFields('Users', [row], fields, ss);
     return { user: publicUser(after), created: false, changes: changes };
@@ -191,6 +218,7 @@ var Auth = (function () {
     checkPassword_(newPw);
     var salt = newSalt();
     D.updateFields('Users', [{ _row: u._row, pw_salt: salt, pw_hash: hash(String(newPw), salt) }], ['pw_salt', 'pw_hash'], ss);
+    deps_().cache.remove('fail:' + normName(u.username));
   }
 
   return {

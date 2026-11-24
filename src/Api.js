@@ -345,15 +345,24 @@ var Api = (function () {
     });
     db_().ensureSchema(ss);
     var r = import_().importRows(raw, ss, {});
-    if (r.ok) log_([['นำเข้าข้อมูล HOSxP', r.from + ' ถึง ' + r.to, r.rows + ' แถว, ยาใหม่ ' + r.newDrugs.length + ' รายการ']], ss);
+    if (!r.ok) return r;
+    log_([['นำเข้าข้อมูล HOSxP', r.from + ' ถึง ' + r.to, r.rows + ' แถว, ยาใหม่ ' + r.newDrugs.length + ' รายการ']], ss);
+    // Importing is step 1 of a round: when the last round is approved, open the next one, so
+    // the count page shows a round staff can type into (not the approved, locked one).
+    var cycle = db_().readTable('Rounds', ss).filter(function (x) { return !isExtra_(x); });
+    if (cycle.length && !openRound_(cycle)) r.newRound = startRound(ss);
     return r;
+  }
+
+  function openRound_(rounds) {
+    return rounds.filter(function (r) { return !isExtra_(r) && r.status !== 'APPROVED'; })[0] || null;
   }
 
   /** Open a round for today, or return the round that is still open. */
   function startRound(ss) {
     var D = db_();
     var rounds = D.readTable('Rounds', ss);
-    var open = rounds.filter(function (r) { return !isExtra_(r) && r.status !== 'APPROVED'; })[0];
+    var open = openRound_(rounds);
     if (open) return roundInfo_(open);
     var today = today_();
     var id = today, n = 2;
@@ -922,7 +931,19 @@ function locked_(token, role, fn) {
 
 function apiLogin(username, password) {
   return Db.withLock(function () {
-    var r = Auth.login(username, password);
+    var r;
+    try {
+      r = Auth.login(username, password);
+    } catch (e) {
+      // Failed logins go to the change log (never the typed password; the typed name only
+      // when it is a real user), so an admin can see why someone could not sign in.
+      if (e.reason) {
+        Api.setActor(e.who || '');
+        Api.log([['เข้าสู่ระบบไม่สำเร็จ', e.who || '', e.reason]]);
+        SpreadsheetApp.flush();
+      }
+      throw e;
+    }
     Api.setActor(r.user.name);
     Api.log([['เข้าสู่ระบบ', r.user.username, '']]);
     return r;

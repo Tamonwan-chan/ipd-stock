@@ -296,7 +296,19 @@
     $('app').hidden = true;
     $('login').hidden = false;
     $('login-msg').textContent = msg || '';
+    $('lg-hint').hidden = true;
     setTimeout(function () { $('lg-user').focus(); }, 0);
+  }
+  // The password field hides what is typed: warn while typing when the keyboard is in Thai mode
+  // ("123456" comes out as "ๅ/-ภถุ") or Caps Lock is on.
+  var THAI = /[฀-๿]/;
+  var THAI_KEYS = 'แป้นพิมพ์เป็นภาษาไทยอยู่ เปลี่ยนเป็นภาษาอังกฤษ (กดปุ่ม ~ หรือ Alt+Shift) ลบรหัสผ่านแล้วพิมพ์ใหม่';
+  function loginHint(e) {
+    var msg = '';
+    if (THAI.test($('lg-pw').value)) msg = THAI_KEYS;
+    else if (e && e.getModifierState && e.getModifierState('CapsLock')) msg = 'Caps Lock เปิดอยู่';
+    $('lg-hint').textContent = msg;
+    $('lg-hint').hidden = !msg;
   }
   function doLogin(e) {
     e.preventDefault();
@@ -781,13 +793,13 @@
       return;
     }
     if (!st.round) {
-      box.innerHTML = '<div class="card"><h2>ยังไม่มีรอบนับที่เปิดอยู่</h2>' +
-        '<p class="muted">พิมพ์ใบนับยา (ปุ่มด้านบน) ไปนับที่ชั้นยา แล้วเริ่มรอบเพื่อกรอกยอดนับ (ทุก ' + st.settings.cycle_days + ' วัน)</p>' +
-        '<button class="btn primary" id="btn-start" type="button">เริ่มรอบนับ วันที่ ' + thDate(st.today) + '</button></div>';
-      $('btn-start').onclick = startRound;
+      box.innerHTML = startCard('ยังไม่มีรอบนับที่เปิดอยู่');
+      wireStart();
       return;
     }
     var locked = st.round.status === 'APPROVED';
+    // The round shown is approved and no round is open: offer the next round first.
+    var canStart = locked && !st.rounds.some(function (r) { return r.status !== 'APPROVED'; });
     var drugs = stockedDrugs();
     var c = counts(drugs), counted = c.counted, ordering = c.ordering;
     var pct = drugs.length ? Math.round(100 * counted / drugs.length) : 0;
@@ -798,8 +810,10 @@
     }).join('');
 
     box.innerHTML =
+      (canStart ? startCard('รอบ ' + thDate(st.round.count_date) + ' อนุมัติแล้ว แก้ไขไม่ได้') : '') +
       '<div class="card">' +
-      '<div class="row"><h2>กรอกยอดนับ รอบ ' + thDate(st.round.count_date) + '</h2>' +
+      '<div class="row"><h2>' + (locked ? 'ยอดนับ' : 'กรอกยอดนับ') + ' รอบ ' + thDate(st.round.count_date) +
+      (locked ? ' <span class="badge ok">อนุมัติแล้ว</span>' : '') + '</h2>' +
       '<span class="spacer"></span><label class="small muted">ดูรอบ <select id="round-pick">' + roundOpts + '</select></label></div>' +
       '<p class="muted small">ใส่จำนวนคงเหลือที่นับได้ตามใบนับยา โปรแกรมคำนวณยอดควรเบิก = สูงสุด − คงเหลือ ' +
       'แล้วใส่ เบิกจริง หรือจำนวน กล่อง × ต่อกล่อง ถ้าจะเบิกเป็นกล่อง ช่องว่าง = ยังไม่นับ, 0 = หมด บันทึกอัตโนมัติ ' +
@@ -814,7 +828,8 @@
       '<input type="search" id="count-search" placeholder="ค้นหายา" value="' + esc(S.filter) + '" aria-label="ค้นหายา">' +
       '<label class="check small"><input type="checkbox" id="only-order"' + (S.onlyOrder ? ' checked' : '') + '> เฉพาะที่ต้องเบิก</label>' +
       '<span class="spacer"></span>' +
-      (locked ? '' : '<button class="btn" id="btn-approve" type="button">อนุมัติรอบนี้</button>') +
+      (locked ? '' : '<button class="btn" id="btn-print-count" type="button">' + icon('printer') + 'พิมพ์ใบนับยา</button>' +
+        '<button class="btn" id="btn-approve" type="button">อนุมัติรอบนี้</button>') +
       (locked ? '<button class="btn primary" id="btn-goto-form" type="button">ไปที่ใบเบิก</button>' : '') +
       '</div>' +
       '<div id="drug-list"></div>';
@@ -822,8 +837,9 @@
     $('round-pick').onchange = function () { flushSave().then(function () { return reload($('round-pick').value); }); };
     $('count-search').oninput = function () { S.filter = this.value; renderDrugList(); };
     $('only-order').onchange = function () { S.onlyOrder = this.checked; renderDrugList(); };
-    if (!locked) setupApprove();
+    if (!locked) { setupApprove(); $('btn-print-count').onclick = printCountSheet; }
     else $('btn-goto-form').onclick = function () { S.reqSub = 'form'; renderRequest(); };
+    if (canStart) wireStart();
     renderDrugList();
     renderSaveState();
   }
@@ -1021,9 +1037,21 @@
     el.textContent = S.lastSaved ? 'บันทึกแล้ว ' + S.lastSaved.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
   }
 
+  // No round open: start the next one (count date = today). The count sheet can be printed first.
+  function startCard(title) {
+    return '<div class="card notice"><h2>' + esc(title) + '</h2>' +
+      '<p class="muted">เริ่มรอบนับใหม่เพื่อกรอกยอดนับและเบิกยารอบนี้ (ทุก ' + S.state.settings.cycle_days + ' วัน) ' +
+      'พิมพ์ใบนับยาไปนับที่ชั้นยาก่อนก็ได้</p>' +
+      '<div class="row"><button class="btn primary" id="btn-start" type="button">เริ่มรอบนับใหม่ วันที่ ' + thDate(S.state.today) + '</button>' +
+      '<button class="btn" id="btn-start-print" type="button">' + icon('printer') + 'พิมพ์ใบนับยา</button></div></div>';
+  }
+  function wireStart() {
+    $('btn-start').onclick = startRound;
+    $('btn-start-print').onclick = printCountSheet;
+  }
   function startRound() {
     $('btn-start').disabled = true;
-    api('apiStartRound').then(function () { return reload(); }).catch(function (e) {
+    api('apiStartRound').then(function (r) { toast('เริ่มรอบนับ ' + thDate(r.count_date) + ' แล้ว'); return reload(); }).catch(function (e) {
       toast('เริ่มรอบไม่สำเร็จ: ' + errMsg(e), true);
       $('btn-start').disabled = false;
     });
@@ -1960,7 +1988,10 @@
         '<li>เบิกจากคลัง ' + (rc.source.MAIN || 0) + ' · ขอจาก OPD ' + (rc.source.OPD || 0) +
         ' · ต้องนับ ' + rc.stocked + ' รายการ</li>' +
         (rc.expensive && rc.expensive.length ? '<li>ยาราคาสูงใช้ไม่บ่อย ' + rc.expensive.length + ' รายการ: ตอนนี้ให้ขอจาก OPD ถ้าจะสต็อก ให้เภสัชกำหนดยอดสูงสุดเองที่ รายการยา › แก้ไขข้อมูลยา</li>' : '') +
+        (r.newRound ? '<li><b>เริ่มรอบเบิกจากคลังใหม่ วันที่ ' + thDate(r.newRound.count_date) + ' แล้ว</b> ' +
+          '<button class="link" type="button" id="btn-import-next">ไปพิมพ์ใบนับยาและกรอกยอดนับ</button></li>' : '') +
         '</ul></div>';
+      if ($('btn-import-next')) $('btn-import-next').onclick = function () { stepGo('count'); };
       return reload();
     }).catch(function (e) {
       $('import-result').innerHTML = '<div class="notice error">นำเข้าไม่สำเร็จ: ' + esc(errMsg(e)) + '</div>';
@@ -2104,6 +2135,8 @@
   // ------------------------------------------------------------------ wiring
   function wire() {
     $('login-form').onsubmit = doLogin;
+    $('lg-pw').oninput = loginHint;
+    $('lg-pw').onkeyup = loginHint;
     $('btn-logout').onclick = logout;
     $('btn-pw').onclick = openPw;
     $('pw-form').onsubmit = savePw;
