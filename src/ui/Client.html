@@ -513,7 +513,7 @@
   // Where each step is done.
   function stepGo(go) {
     if (go === 'import') { showView('import'); return; }
-    if (go === 'print-count') { printCountSheet(); return; }
+    if (go === 'print-count') { printCountSheet('main'); return; }
     if (go === 'receive') {
       var r = S.state.round;
       if (r && (S.state.main_docs || []).some(function (d) { return d.round_id === r.round_id; })) S.recvSel = 'MAIN:' + r.round_id;
@@ -751,12 +751,15 @@
 
   // ------------------------------------------------------------- count sheet
   // Printed before counting: what to count, with max/min; staff write the counts, then type them in.
-  function printCountSheet() {
-    var st = S.state, main = stockedDrugs(), opd = opdShelfDrugs();
+  // `which` follows the page it is printed from: 'main' (เบิกจากคลัง, the 2-week round) lists only
+  // main-storage drugs; 'opd' (เบิกจาก OPD) lists only drugs fetched from OPD.
+  function printCountSheet(which) {
+    var st = S.state, isOpd = which === 'opd';
+    var main = isOpd ? [] : stockedDrugs(), opd = isOpd ? opdShelfDrugs() : [];
     if (!main.length && !opd.length) { toast('ยังไม่มียาในรายการ นำเข้าข้อมูล HOSxP ก่อน', true); return; }
-    var date = st.round && st.round.status !== 'APPROVED' ? st.round.count_date : st.today;
+    var date = !isOpd && st.round && st.round.status !== 'APPROVED' ? st.round.count_date : st.today;
     var n = 0;
-    var html = '<div class="cs-page"><h1>ใบนับยา ห้องยาผู้ป่วยใน (IPD)</h1>' +
+    var html = '<div class="cs-page"><h1>ใบนับยา ' + (isOpd ? 'ยาที่ขอจาก OPD' : 'เบิกจากคลัง') + ' ห้องยาผู้ป่วยใน (IPD)</h1>' +
       '<div class="cs-head"><span>วันที่นับ ' + thDate(date) + '</span><span>ผู้นับ ..............................................</span></div>' +
       '<p class="small">นับเป็นหน่วยตามที่เขียน ช่องว่าง = ยังไม่นับ ถ้าหมดให้เขียน 0 · สูงสุด/ต่ำสุด คำนวณจากข้อมูล HOSxP ' +
       thDate(st.usage.from) + ' – ' + thDate(st.usage.to) + '</p>';
@@ -782,7 +785,7 @@
       html += '</tbody></table>';
     }
     printHtml(html + '</div>');
-    markPrinted('count');
+    if (!isOpd) markPrinted('count'); // round step 2 is the main-storage count sheet
   }
 
   // ----------------------------------------------------------------- count
@@ -837,7 +840,7 @@
     $('round-pick').onchange = function () { flushSave().then(function () { return reload($('round-pick').value); }); };
     $('count-search').oninput = function () { S.filter = this.value; renderDrugList(); };
     $('only-order').onchange = function () { S.onlyOrder = this.checked; renderDrugList(); };
-    if (!locked) { setupApprove(); $('btn-print-count').onclick = printCountSheet; }
+    if (!locked) { setupApprove(); $('btn-print-count').onclick = function () { printCountSheet('main'); }; }
     else $('btn-goto-form').onclick = function () { S.reqSub = 'form'; renderRequest(); };
     if (canStart) wireStart();
     renderDrugList();
@@ -1047,7 +1050,7 @@
   }
   function wireStart() {
     $('btn-start').onclick = startRound;
-    $('btn-start-print').onclick = printCountSheet;
+    $('btn-start-print').onclick = function () { printCountSheet('main'); };
   }
   function startRound() {
     $('btn-start').disabled = true;
@@ -2190,6 +2193,7 @@
       copyText(formRows().map(function (r) { return r.join('\t'); }).join('\n'));
     };
     $('opd-search').oninput = function () { S.opdFilter = this.value; renderOpd(); };
+    $('btn-opd-count').onclick = function () { printCountSheet('opd'); };
     $('btn-opd-clear').onclick = function () { S.opdSel = {}; S.opdQty = {}; store('opdSel', {}); store('opdQty', {}); renderOpd(); };
     $('opd-all').onchange = function () {
       S.opdAll = this.checked;
