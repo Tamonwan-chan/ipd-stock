@@ -782,7 +782,7 @@
     var n = 0;
     var html = '<div class="cs-page"><h1>ใบนับยา ' + (isOpd ? 'ยาที่ขอจาก OPD' : 'เบิกจากคลัง') + ' ห้องยาผู้ป่วยใน (IPD)</h1>' +
       '<div class="cs-head"><span>วันที่นับ ' + thDate(date) + '</span><span>ผู้นับ ..............................................</span></div>' +
-      '<p class="small"><b>' + esc(dataFileText(st.data)) + '</b> · ' +
+      '<p class="small"><b>' + esc(dataFileText(st.data)) + '</b><br>' +
       esc(dataWindowText(st.data, isOpd ? 'ใช้เฉลี่ย' : 'สูงสุด/ต่ำสุด')) + '</p>' +
       '<p class="small">นับเป็นหน่วยตามที่เขียน ช่องว่าง = ยังไม่นับ ถ้าหมดให้เขียน 0</p>';
     if (main.length) {
