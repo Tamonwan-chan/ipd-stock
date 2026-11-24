@@ -75,7 +75,24 @@ var Api = (function () {
       received_at: r.received_at || '', received_by: r.received_by || '',
       req_no: r.req_no || '', receipt_no: r.receipt_no || '',
       kind: isExtra_(r) ? 'EXTRA' : '', note: r.note || '',
-      count_printed_at: r.count_printed_at || '', form_printed_at: r.form_printed_at || '' };
+      count_printed_at: r.count_printed_at || '', form_printed_at: r.form_printed_at || '',
+      data_from: r.data_from || '', data_to: r.data_to || '',
+      import_from: r.import_from || '', import_to: r.import_to || '', import_at: r.import_at || '' };
+  }
+
+  /** The HOSxP data in use now: the max/min window and the last file imported. */
+  function dataNow_(ss) {
+    var D = db_(), raw = D.readSettings(ss);
+    var out = { data_from: D.fromCell(raw.usage_from, 'date'), data_to: D.fromCell(raw.usage_to, 'date'),
+      import_from: D.fromCell(raw.import_from, 'date'), import_to: D.fromCell(raw.import_to, 'date'),
+      import_at: D.fromCell(raw.import_at, 'datetime'), import_by: String(raw.import_by || '') };
+    if (!out.import_to) {
+      // Imported before these Settings rows existed: take the last import in the change log.
+      var last = readOptional_('ChangeLog', ss).filter(function (x) { return x.action === 'นำเข้าข้อมูล HOSxP'; }).pop();
+      var m = last && /^(\d{4}-\d{2}-\d{2}) ถึง (\d{4}-\d{2}-\d{2})$/.exec(String(last.target || ''));
+      if (m) { out.import_from = m[1]; out.import_to = m[2]; out.import_at = last.at || ''; out.import_by = last.user || ''; }
+    }
+    return out;
   }
 
   /** A ใบเบิกพิเศษ (extra main-storage request outside the 2-week round), kept in Rounds. */
@@ -237,6 +254,7 @@ var Api = (function () {
         window_days: C.windowDays(s), min_days: C.minDays(s), min_use_freq: s.min_use_freq,
         opd_cycle_days: s.opd_cycle_days },
       usage: { from: D.fromCell(raw.usage_from, 'date'), to: D.fromCell(raw.usage_to, 'date') },
+      data: dataNow_(ss),
       drugs: out,
       round: round ? roundInfo_(round) : null,
       lines: lines,
@@ -347,6 +365,13 @@ var Api = (function () {
     var r = import_().importRows(raw, ss, {});
     if (!r.ok) return r;
     log_([['นำเข้าข้อมูล HOSxP', r.from + ' ถึง ' + r.to, r.rows + ' แถว, ยาใหม่ ' + r.newDrugs.length + ' รายการ']], ss);
+    // The file staff dragged in (its dates, when, who), shown on the count page and count sheet
+    // so they can confirm the round uses the right file.
+    var note = 'ไฟล์ HOSxP ที่นำเข้าล่าสุด (เขียนโดยโปรแกรม)';
+    db_().upsert('Settings', [
+      { key: 'import_from', value: r.from, note: note }, { key: 'import_to', value: r.to, note: note },
+      { key: 'import_at', value: now_(), note: note }, { key: 'import_by', value: actor_(), note: note }
+    ], ss);
     // Importing is step 1 of a round: when the last round is approved, open the next one, so
     // the count page shows a round staff can type into (not the approved, locked one).
     var cycle = db_().readTable('Rounds', ss).filter(function (x) { return !isExtra_(x); });
@@ -742,7 +767,10 @@ var Api = (function () {
     round.approved_at = now_();
     round.reviewed_by = actor_();
     if (mine.some(function (l) { return requested_(l) > 0; })) round.req_no = nextNo_('บ', 'req_no', ss);
-    D.updateFields('Rounds', [round], ['status', 'approved_at', 'reviewed_by', 'req_no'], ss);
+    // Keep the HOSxP data this round was counted and requested with.
+    var data = dataNow_(ss), DATA = ['data_from', 'data_to', 'import_from', 'import_to', 'import_at'];
+    DATA.forEach(function (k) { round[k] = data[k]; });
+    D.updateFields('Rounds', [round], ['status', 'approved_at', 'reviewed_by', 'req_no'].concat(DATA), ss);
     // The change log gets the final count and request of each line here, once,
     // not every autosave while staff type.
     var drugs = {};

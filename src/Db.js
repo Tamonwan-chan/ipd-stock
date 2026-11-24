@@ -176,7 +176,8 @@ var Db = (function () {
 
     var have = {};
     var defaults = calc_().DEFAULTS;
-    var written = { usage_from: true, usage_to: true }; // written by recompute, not in DEFAULTS
+    // written by recompute and the web app's import, not in DEFAULTS
+    var written = { usage_from: true, usage_to: true, import_from: true, import_to: true, import_at: true, import_by: true };
     var stale = [];
     readTable('Settings', book).forEach(function (r) {
       if (!r.key) return;

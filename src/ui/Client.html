@@ -749,6 +749,27 @@
     else renderOpd();
   }
 
+  // ------------------------------------------------------------- HOSxP data
+  // The HOSxP data behind a round: the file staff imported (its dates, when) and the window
+  // max/min were computed from. An approved round shows what it was approved with; otherwise now.
+  function roundData(r) {
+    return r && r.status === 'APPROVED' && (r.data_to || r.import_to) ? r : S.state.data;
+  }
+  function dataFileText(dt) {
+    return dt.import_to ? 'ไฟล์ HOSxP ที่นำเข้า: ข้อมูลวันที่ ' + thDate(dt.import_from) + ' – ' + thDate(dt.import_to) +
+      (dt.import_at ? ' (นำเข้า ' + thDateTime(dt.import_at) + ')' : '') : 'ไม่มีบันทึกไฟล์ HOSxP ที่นำเข้า';
+  }
+  function dataWindowText(dt, what) {
+    return dt.data_to ? (what || 'สูงสุด/ต่ำสุด') + ' คำนวณจากข้อมูล ' + thDate(dt.data_from) + ' – ' + thDate(dt.data_to) : '';
+  }
+  function dataInfoHtml(r) {
+    var dt = roundData(r);
+    return '<div class="data-info">' + icon('folder') + '<div><b>' + esc(dataFileText(dt)) + '</b>' +
+      '<div class="muted small">' + esc(dataWindowText(dt)) +
+      (r && r.status === 'APPROVED' && dt === r ? ' · ตามข้อมูลตอนอนุมัติรอบนี้' : ' · ตรวจว่าเป็นไฟล์ของรอบนี้ ถ้าไม่ใช่ นำเข้าไฟล์ใหม่ก่อนนับ') +
+      '</div></div></div>';
+  }
+
   // ------------------------------------------------------------- count sheet
   // Printed before counting: what to count, with max/min; staff write the counts, then type them in.
   // `which` follows the page it is printed from: 'main' (เบิกจากคลัง, the 2-week round) lists only
@@ -761,8 +782,9 @@
     var n = 0;
     var html = '<div class="cs-page"><h1>ใบนับยา ' + (isOpd ? 'ยาที่ขอจาก OPD' : 'เบิกจากคลัง') + ' ห้องยาผู้ป่วยใน (IPD)</h1>' +
       '<div class="cs-head"><span>วันที่นับ ' + thDate(date) + '</span><span>ผู้นับ ..............................................</span></div>' +
-      '<p class="small">นับเป็นหน่วยตามที่เขียน ช่องว่าง = ยังไม่นับ ถ้าหมดให้เขียน 0 · สูงสุด/ต่ำสุด คำนวณจากข้อมูล HOSxP ' +
-      thDate(st.usage.from) + ' – ' + thDate(st.usage.to) + '</p>';
+      '<p class="small"><b>' + esc(dataFileText(st.data)) + '</b> · ' +
+      esc(dataWindowText(st.data, isOpd ? 'ใช้เฉลี่ย' : 'สูงสุด/ต่ำสุด')) + '</p>' +
+      '<p class="small">นับเป็นหน่วยตามที่เขียน ช่องว่าง = ยังไม่นับ ถ้าหมดให้เขียน 0</p>';
     if (main.length) {
       html += '<h2>เบิกจากคลัง (' + main.length + ' รายการ)</h2><table><thead><tr><th style="width:7%">ลำดับ</th><th>ยา</th>' +
         '<th style="width:12%">หน่วย</th><th style="width:10%">สูงสุด</th><th style="width:10%">ต่ำสุด</th><th style="width:16%">นับได้</th></tr></thead><tbody>';
@@ -818,6 +840,7 @@
       '<div class="row"><h2>' + (locked ? 'ยอดนับ' : 'กรอกยอดนับ') + ' รอบ ' + thDate(st.round.count_date) +
       (locked ? ' <span class="badge ok">อนุมัติแล้ว</span>' : '') + '</h2>' +
       '<span class="spacer"></span><label class="small muted">ดูรอบ <select id="round-pick">' + roundOpts + '</select></label></div>' +
+      dataInfoHtml(st.round) +
       '<p class="muted small">ใส่จำนวนคงเหลือที่นับได้ตามใบนับยา โปรแกรมคำนวณยอดควรเบิก = สูงสุด − คงเหลือ ' +
       'แล้วใส่ เบิกจริง หรือจำนวน กล่อง × ต่อกล่อง ถ้าจะเบิกเป็นกล่อง ช่องว่าง = ยังไม่นับ, 0 = หมด บันทึกอัตโนมัติ ' +
       '(สูงสุด = ใช้เฉลี่ยต่อวัน × ' + st.settings.window_days + ' วัน + ยาสำรอง · ต่ำสุด = ใช้เฉลี่ยต่อวัน × ' + st.settings.min_days + ' วัน + ยาสำรอง)</p>' +
@@ -1094,7 +1117,7 @@
     if (!S.state.round) { box.innerHTML = '<div class="card">ยังไม่มีรอบนับ เริ่มรอบที่ นับยาและยอดเบิก ก่อน</div>'; $('form-summary').textContent = ''; return; }
     var pages = Math.max(1, Math.ceil(lines.length / LINES_PER_PAGE));
     $('form-summary').textContent = lines.length + ' รายการ · ' + pages + ' แผ่น' +
-      (S.state.round.status === 'APPROVED' ? '' : ' · รอบนี้ยังไม่อนุมัติ');
+      (S.state.round.status === 'APPROVED' ? '' : ' · รอบนี้ยังไม่อนุมัติ') + ' · ' + dataFileText(roundData(S.state.round));
     box.innerHTML = formPagesHtml(lines, { book: S.head.book, no: formNo(), from: S.head.from, to: S.head.to, date: S.head.date });
   }
 
