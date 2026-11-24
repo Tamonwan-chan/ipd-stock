@@ -135,6 +135,18 @@ var Schema = (function () {
         ['received_qty', 'number']
       ])
     },
+    // What is left on the IPD shelf of drugs fetched from OPD, counted on the OPD page (any day,
+    // not tied to a 2-week round). One row per day and drug; blank qty = the count was cleared.
+    OpdCounts: {
+      key: ['count_date', 'drug_id'],
+      columns: cols([
+        ['count_date', 'date'],
+        ['drug_id', 'string'],
+        ['qty', 'number'],
+        ['counted_by', 'string'],
+        ['counted_at', 'datetime']
+      ])
+    },
     // Web app logins (Auth.js). Passwords are stored only as a salted hash.
     Users: {
       key: ['username'],
@@ -191,7 +203,7 @@ var Schema = (function () {
   };
 
   /** Tab order when creating the spreadsheet. */
-  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'Expiry',
+  var ORDER = ['Settings', 'Drugs', 'UsageDaily', 'Rounds', 'RoundLines', 'OpdRequests', 'OpdLines', 'OpdCounts', 'Expiry',
     'Users', 'ChangeLog', 'Import'];
 
   /** Allowed values for coded columns. */

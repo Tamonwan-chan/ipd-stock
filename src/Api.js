@@ -199,17 +199,14 @@ var Api = (function () {
     if (roundId) round = cycle.filter(function (r) { return r.round_id === roundId; })[0] || null;
     if (!round) round = cycle.filter(function (r) { return r.status !== 'APPROVED'; })[0] || cycle[0] || null;
 
-    var lines = {}, lastCount = {}, byRound = {};
-    var roundDate = {};
-    rounds.forEach(function (r) { roundDate[r.round_id] = r.count_date; });
-    D.readTable('RoundLines', ss).forEach(function (l) {
+    var lines = {}, byRound = {};
+    var roundLines = D.readTable('RoundLines', ss);
+    roundLines.forEach(function (l) {
       if (round && l.round_id === round.round_id) lines[l.drug_id] = lineFromRow_(l);
       (byRound[l.round_id] = byRound[l.round_id] || []).push(l);
-      var q = C.toNumber(l.on_hand), dt = roundDate[l.round_id];
-      if (q === null || !dt) return;
-      var prev = lastCount[l.drug_id];
-      if (!prev || dt > prev.date) lastCount[l.drug_id] = { qty: q, date: dt };
     });
+    var opdCount = latestOpdCounts_(ss);
+    var lastCount = lastCounts_(rounds, roundLines, opdCount);
 
     var out = drugs.filter(function (d) { return d.drug_id; }).map(function (d) {
       var p = C.parFromStored(d);
@@ -244,7 +241,8 @@ var Api = (function () {
         use_freq: C.toNumber(d.use_freq) || 0,
         opd_suggestion: C.opdSuggestion(mean, factor, s),
         manual_source: manual,
-        last_count: lastCount[d.drug_id] || null
+        last_count: lastCount[d.drug_id] || null,
+        opd_count: opdCount[d.drug_id] || null // latest count typed on the OPD page
       };
     });
 
@@ -589,10 +587,79 @@ var Api = (function () {
     D.appendRows('OpdRequests', [r], ss);
     var out = rows.map(function (l) { return { request_id: id, drug_id: l.drug_id, qty: l.qty, received_qty: '' }; });
     D.appendRows('OpdLines', out, ss);
-    log_([['ขอยาจาก OPD', r.req_no, (kind === 'URGENT' ? 'ด่วน' : 'ประจำเดือน') + ': ' + rows.map(function (l) {
+    // Today's shelf counts go in the change log here, once, not on every autosave.
+    var counted = readOptional_('OpdCounts', ss).filter(function (c) {
+      return c.count_date === today && C.toNumber(c.qty) !== null;
+    });
+    log_((counted.length ? [['นับคงเหลือยา OPD', today, counted.map(function (c) {
+      return (drugLabel_(drugs[c.drug_id]) || c.drug_id) + ' ' + c.qty;
+    }).join(', ')]] : []).concat([['ขอยาจาก OPD', r.req_no, (kind === 'URGENT' ? 'ด่วน' : 'ประจำเดือน') + ': ' + rows.map(function (l) {
       return drugLabel_(drugs[l.drug_id]) + ' ' + l.qty;
-    }).join(', ')]], ss);
+    }).join(', ')]]), ss);
     return opdInfo_(r, out.map(function (l) { return { drug_id: l.drug_id, qty: l.qty, received_qty: '' }; }));
+  }
+
+  /**
+   * Latest shelf count per drug, {drug_id: {qty, date}}: from round lines (dated by the round's
+   * count date) and from counts typed on the OPD page, which win on the same day.
+   */
+  function lastCounts_(rounds, roundLines, opdCount) {
+    var C = calc_(), out = {}, roundDate = {};
+    rounds.forEach(function (r) { roundDate[r.round_id] = r.count_date; });
+    roundLines.forEach(function (l) {
+      var q = C.toNumber(l.on_hand), dt = roundDate[l.round_id];
+      if (q === null || !dt) return;
+      var prev = out[l.drug_id];
+      if (!prev || dt > prev.date) out[l.drug_id] = { qty: q, date: dt };
+    });
+    Object.keys(opdCount).forEach(function (id) {
+      var c = opdCount[id], prev = out[id];
+      if (!prev || c.date >= prev.date) out[id] = c;
+    });
+    return out;
+  }
+
+  /** Latest non-blank count per drug from OpdCounts: {drug_id: {qty, date}}. */
+  function latestOpdCounts_(ss) {
+    var C = calc_(), out = {};
+    readOptional_('OpdCounts', ss).forEach(function (c) {
+      var q = C.toNumber(c.qty);
+      if (q === null || !c.count_date) return;
+      var prev = out[c.drug_id];
+      if (!prev || c.count_date > prev.date) out[c.drug_id] = { qty: q, date: c.count_date };
+    });
+    return out;
+  }
+
+  /**
+   * Save shelf counts of drugs fetched from OPD, typed on the OPD page (autosaved as typed).
+   * Counts are dated today; typing again the same day replaces that day's count, and a blank
+   * clears it (the previous day's count then applies again). Main-storage drugs are counted
+   * in the 2-week round instead. Logged once when the OPD request is saved.
+   * @param {{drug_id:string, qty:*}[]} edits
+   * @return {Object<string, {opd_count:Object|null, last_count:Object|null}>} by drug_id after the
+   *   save: the latest count from this page, and the latest count from anywhere ({qty, date} each)
+   */
+  function saveOpdCounts(edits, ss) {
+    var C = calc_(), D = db_();
+    D.ensureColumns('OpdCounts', ss);
+    var drugs = {};
+    D.readTable('Drugs', ss).forEach(function (d) { drugs[d.drug_id] = d; });
+    var today = today_(), at = now_();
+    var rows = (edits || []).map(function (e) {
+      var d = drugs[e.drug_id];
+      if (!d) throw new Error('ไม่พบยา ' + e.drug_id);
+      if (d.stocked) throw new Error(drugLabel_(d) + ' เป็นยาเบิกจากคลัง ให้นับในหน้าเบิกจากคลัง');
+      var blank = e.qty === null || e.qty === undefined || String(e.qty).trim() === '';
+      var q = blank ? null : C.toNumber(e.qty);
+      if (!blank && (q === null || q < 0)) throw new Error('จำนวนคงเหลือไม่ถูกต้อง: ' + e.qty);
+      return { count_date: today, drug_id: e.drug_id, qty: q === null ? '' : q, counted_by: actor_(), counted_at: at };
+    });
+    if (rows.length) D.upsert('OpdCounts', rows, ss);
+    var opd = latestOpdCounts_(ss);
+    var last = lastCounts_(D.readTable('Rounds', ss), D.readTable('RoundLines', ss), opd), out = {};
+    rows.forEach(function (r) { out[r.drug_id] = { opd_count: opd[r.drug_id] || null, last_count: last[r.drug_id] || null }; });
+    return out;
   }
 
   function opdById_(requestId, ss) {
@@ -846,6 +913,11 @@ var Api = (function () {
       hist.push({ type: 'OPD', ref: l.request_id, date: r.request_date, status: r.status, kind: r.kind,
         on_hand: '', requested: C.toNumber(l.qty), received_qty: l.received_qty, received_at: r.received_at || '' });
     });
+    readOptional_('OpdCounts', ss).forEach(function (c) {
+      if (c.drug_id !== drugId || C.toNumber(c.qty) === null) return;
+      hist.push({ type: 'OPD_COUNT', ref: 'OPDCOUNT-' + c.count_date, date: c.count_date, status: '', kind: '',
+        on_hand: C.toNumber(c.qty), requested: '', received_qty: '', received_at: '' });
+    });
     hist.sort(function (a, b) {
       return a.date < b.date ? 1 : a.date > b.date ? -1 : a.ref < b.ref ? 1 : a.ref > b.ref ? -1 : 0;
     });
@@ -934,7 +1006,7 @@ var Api = (function () {
 
   return { state: state, importFile: importFile, startRound: startRound, saveLines: saveLines, approveRound: approveRound,
     saveReceived: saveReceived, confirmReceipt: confirmReceipt, createOpdRequest: createOpdRequest,
-    saveOpdReceived: saveOpdReceived, confirmOpdReceipt: confirmOpdReceipt,
+    saveOpdReceived: saveOpdReceived, confirmOpdReceipt: confirmOpdReceipt, saveOpdCounts: saveOpdCounts,
     cancelOpdRequest: cancelOpdRequest, createExtraRequest: createExtraRequest, cancelExtraRequest: cancelExtraRequest,
     markPrinted: markPrinted,
     removeExpiry: removeExpiry, drugCard: drugCard, saveDrug: saveDrug,
@@ -999,6 +1071,7 @@ function apiSaveReceived(token, roundId, edits) { return locked_(token, null, fu
 function apiConfirmReceipt(token, roundId) { return locked_(token, null, function () { return Api.confirmReceipt(roundId); }); }
 function apiConfirmOpdReceipt(token, requestId) { return locked_(token, null, function () { return Api.confirmOpdReceipt(requestId); }); }
 function apiCreateOpdRequest(token, kind, lines, note) { return locked_(token, null, function () { return Api.createOpdRequest(kind, lines, note); }); }
+function apiSaveOpdCounts(token, edits) { return locked_(token, null, function () { return Api.saveOpdCounts(edits); }); }
 function apiSaveOpdReceived(token, requestId, edits) { return locked_(token, null, function () { return Api.saveOpdReceived(requestId, edits); }); }
 function apiCancelOpdRequest(token, requestId) { return locked_(token, null, function () { return Api.cancelOpdRequest(requestId); }); }
 function apiCreateExtraRequest(token, lines, note) { return locked_(token, null, function () { return Api.createExtraRequest(lines, note); }); }

@@ -29,6 +29,10 @@
     onlyOrder: false,
     opdSel: {},           // drug_id -> true
     opdQty: {},           // drug_id -> qty typed
+    opdCnt: {},           // drug_id -> shelf count typed on the OPD page, not saved yet
+    opdCntTimer: null,
+    opdCntSaving: null,   // promise of the count save in flight
+    opdCntSaved: null,    // time of the last count save
     opdFilter: '',
     opdAll: false,        // OPD list also shows main-storage drugs (urgent fetch)
     exLines: [],          // ใบเบิกพิเศษ being written: [{drug_id, qty}] in the order added
@@ -463,22 +467,20 @@
     var st = S.state, r = st.round;
     var drugs = r ? stockedDrugs() : [];
     var c = r ? counts(drugs) : { counted: 0, ordering: 0 };
-    var opdAll = opdShelfDrugs().length;
-    var opdCounted = r ? opdShelfDrugs().filter(function (d) { return lineOf(d).counted; }).length : 0;
     var open = !!r && r.status !== 'APPROVED';
     var approved = !!r && r.status === 'APPROVED';
     var received = !!r && !!r.received_at;
     // Step 1 is done when the HOSxP data reaches within a week of the count date (or today).
     var ref = parseIso(r ? r.count_date : st.today), to = parseIso(st.usage.to);
     var fresh = !!(ref && to && ref - to <= 7 * 86400000);
-    var started = c.counted > 0 || opdCounted > 0;
+    var started = c.counted > 0;
     return [
       { name: 'นำเข้าข้อมูล HOSxP', go: 'import', done: fresh,
         sub: st.usage.to ? 'ข้อมูลถึง ' + thDate(st.usage.to) : 'ยังไม่มีข้อมูล' },
       { name: 'พิมพ์ใบนับยา', go: 'print-count', done: !!r && (approved || started || !!r.count_printed_at), icon: 'printer',
         sub: r && r.count_printed_at ? 'พิมพ์ ' + thDateTime(r.count_printed_at) : open ? 'กดเพื่อพิมพ์' : '' },
       { name: 'กรอกยอดนับ', go: 'count', done: approved || (open && drugs.length > 0 && c.counted === drugs.length),
-        sub: r ? 'นับแล้ว ' + c.counted + '/' + drugs.length + (opdAll ? ' · OPD ' + opdCounted + '/' + opdAll : '') : '' },
+        sub: r ? 'นับแล้ว ' + c.counted + '/' + drugs.length : '' },
       { name: 'เบิกจริง / กล่อง', go: 'count', done: approved,
         sub: r ? 'ต้องเบิก ' + c.ordering + ' รายการ' : '' },
       { name: 'อนุมัติ', go: 'approve', done: approved,
@@ -641,6 +643,7 @@
       '<th class="num">คงเหลือ (นับ)</th><th class="num">ขอ/เบิก</th><th class="num">ได้รับ</th></tr></thead><tbody>' +
       c.history.map(function (h) {
         var what = h.type === 'MAIN' ? (h.kind === 'EXTRA' ? 'ใบเบิกพิเศษ (คลัง)' : 'รอบเบิกคลัง' + (h.status === 'APPROVED' ? '' : ' (กำลังนับ)'))
+          : h.type === 'OPD_COUNT' ? 'นับคงเหลือ (หน้าเบิกจาก OPD)'
           : 'ขอจาก OPD ' + (h.kind === 'URGENT' ? '(ด่วน)' : '(ประจำเดือน)');
         var req = num(h.requested);
         var reqText = h.type === 'MAIN' && num(h.boxes) !== null && num(h.pack_size) !== null
@@ -887,23 +890,13 @@
       html += rowHtml(d, l, locked);
     });
     if (!shown) html += '<p class="muted">ไม่มีรายการ</p>';
-    var opd = S.onlyOrder ? [] : opdShelfDrugs().filter(hit);
-    if (opd.length) {
-      var cyc = st.settings.opd_cycle_days;
-      html += '<div class="loc-head">ยาที่ขอจาก OPD: นับคงเหลือเท่านั้น ไม่ได้เบิกจากคลัง (ใช้คำนวณจำนวนที่จะขอจาก OPD)</div>' +
-        '<div class="drow opd head"><span>ยา</span><span class="num">ใช้เฉลี่ย/' + cyc + ' วัน</span><span class="num">คงเหลือ (นับ)</span></div>' +
-        opd.map(function (d) { return opdRowHtml(d, lineOf(d), locked); }).join('');
+    // Drugs fetched from OPD are counted on the เบิกจาก OPD page (#19), not here.
+    if (!S.onlyOrder && opdShelfDrugs().length) {
+      html += '<p class="muted small">ยาที่ขอจาก OPD นับคงเหลือที่หน้า <a href="#" id="go-opd-count">เบิกจาก OPD</a></p>';
     }
     $('drug-list').innerHTML = html;
     each('input[data-f]', $('drug-list'), function (inp) { inp.oninput = onEdit; });
-  }
-
-  function opdRowHtml(d, l, locked) {
-    return '<div class="drow opd" id="row-' + esc(d.drug_id) + '">' +
-      '<div class="cell-name"><div class="name">' + esc(d.name) + '</div><div class="meta">' + esc(d.strength) + ' · ' + esc(d.unit) + '</div></div>' +
-      '<div class="num"><span class="lbl">ใช้เฉลี่ย/เดือน</span>' + fmt(d.opd_suggestion, 0) + '</div>' +
-      '<div><span class="lbl">คงเหลือ (นับ)</span><input type="number" inputmode="decimal" step="any" min="0" data-f="on_hand" data-id="' +
-      esc(d.drug_id) + '" value="' + esc(l.on_hand) + '"' + (locked ? ' disabled' : '') + ' aria-label="คงเหลือ ' + esc(d.name) + '"></div></div>';
+    if ($('go-opd-count')) $('go-opd-count').onclick = function (e) { e.preventDefault(); S.reqMode = 'opd'; store('reqMode', 'opd'); renderRequest(); };
   }
 
   function rowHtml(d, l, locked) {
@@ -1526,15 +1519,90 @@
       return (d.source === 'OPD' && (d.use_freq > 0 || d.manual_source === 'OPD')) || (S.opdAll && d.stocked);
     }).sort(byName);
   }
-  // Suggested: a month's average use, less what was counted on the shelf this cycle.
+  // Suggested: a month's average use, less the shelf count. A count typed here and not saved yet
+  // counts at once; otherwise the latest count within one OPD cycle (opd_cycle_days).
   function recentCount(d) {
+    var p = S.opdCnt[d.drug_id];
+    if (p !== undefined && String(p).trim() !== '' && num(p) !== null) return { qty: num(p), date: S.state.today };
     var c = d.last_count;
-    return c && c.date >= isoAddDays(S.state.today, -S.state.settings.cycle_days) ? c : null;
+    return c && c.date >= isoAddDays(S.state.today, -S.state.settings.opd_cycle_days) ? c : null;
   }
   function opdSuggest(d) {
     if (d.source !== 'OPD') return null;
     var c = recentCount(d);
     return c ? Math.max(0, d.opd_suggestion - Math.floor(c.qty)) : d.opd_suggestion;
+  }
+  // The count box shows today's count from this page (or what is being typed); an older count is
+  // shown under it and still used for the suggestion while it is within the OPD cycle.
+  function opdCountValue(d) {
+    var p = S.opdCnt[d.drug_id];
+    if (p !== undefined) return p;
+    return d.opd_count && d.opd_count.date === S.state.today ? d.opd_count.qty : '';
+  }
+  function opdCountCell(d) {
+    if (d.source !== 'OPD') { // main-storage drug shown for an urgent fetch: counted in the round
+      var lc = d.last_count;
+      return lc ? fmt(lc.qty) + ' <span class="muted small">' + thDate(lc.date) + '</span>' : '<span class="muted">–</span>';
+    }
+    var lc2 = d.last_count, older = lc2 && lc2.date !== S.state.today;
+    return '<input type="number" inputmode="decimal" step="any" min="0" data-opdc="' + esc(d.drug_id) + '" value="' +
+      esc(opdCountValue(d)) + '" aria-label="คงเหลือที่นับ ' + esc(d.name) + '">' +
+      (older ? '<div class="muted small">ล่าสุด ' + fmt(lc2.qty) + ' · ' + thDate(lc2.date) + '</div>' : '');
+  }
+
+  function onOpdCount() {
+    var id = this.getAttribute('data-opdc'), d = drugById(id);
+    S.opdCnt[id] = this.value;
+    var q = this.closest('tr').querySelector('[data-opdq]'), sug = opdSuggest(d);
+    if (q) q.placeholder = sug === null ? '' : sug;
+    if ($('opd-counted')) $('opd-counted').textContent = opdDrugs().filter(function (x) {
+      return x.source === 'OPD' && String(opdCountValue(x)).trim() !== '';
+    }).length;
+    renderOpdSaveState();
+    clearTimeout(S.opdCntTimer);
+    S.opdCntTimer = setTimeout(flushOpdCounts, 1200);
+  }
+
+  // Autosave of the counts typed on the OPD page (same pattern as flushSave for the round).
+  function flushOpdCounts() {
+    clearTimeout(S.opdCntTimer);
+    var ids = Object.keys(S.opdCnt);
+    if (!ids.length || S.opdCntSaving) return S.opdCntSaving || Promise.resolve();
+    var sent = {};
+    ids.forEach(function (id) { sent[id] = S.opdCnt[id]; });
+    var p = api('apiSaveOpdCounts', ids.map(function (id) { return { drug_id: id, qty: sent[id] }; })).then(function (saved) {
+      S.opdCntSaving = null;
+      Object.keys(saved).forEach(function (id) {
+        var d = drugById(id);
+        if (!d) return;
+        d.opd_count = saved[id].opd_count;
+        d.last_count = saved[id].last_count;
+        if (S.opdCnt[id] === sent[id]) delete S.opdCnt[id];
+        // a cleared count falls back to the previous one: show the suggestion from it
+        var box = $('opd-list') && $('opd-list').querySelector('[data-opdq="' + id + '"]'), sug = opdSuggest(d);
+        if (box) box.placeholder = sug === null ? '' : sug;
+      });
+      S.opdCntSaved = new Date();
+      renderOpdSaveState();
+      if (Object.keys(S.opdCnt).length) S.opdCntTimer = setTimeout(flushOpdCounts, 1200);
+    }).catch(function (e) {
+      S.opdCntSaving = null;
+      renderOpdSaveState(errMsg(e));
+      toast('บันทึกยอดนับไม่สำเร็จ: ' + errMsg(e) + ' (จะลองใหม่เมื่อแก้ไขครั้งถัดไป)', true);
+    });
+    S.opdCntSaving = p;
+    renderOpdSaveState();
+    return p;
+  }
+
+  function renderOpdSaveState(error) {
+    var el = $('opd-save-state');
+    if (!el) return;
+    var n = Object.keys(S.opdCnt).length;
+    if (error) { el.innerHTML = '<span class="badge danger">บันทึกยอดนับไม่สำเร็จ ' + n + ' รายการ</span>'; return; }
+    if (S.opdCntSaving) { el.innerHTML = '<span class="spinner"></span> กำลังบันทึกยอดนับ…'; return; }
+    if (n) { el.textContent = 'รอบันทึกยอดนับ ' + n + ' รายการ'; return; }
+    el.textContent = S.opdCntSaved ? 'บันทึกยอดนับแล้ว ' + S.opdCntSaved.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
   }
   function opdQty(d) { var v = S.opdQty[d.drug_id]; return v === undefined || v === '' ? opdSuggest(d) : num(v); }
 
@@ -1559,19 +1627,27 @@
     }
     var cyc = S.state.settings.opd_cycle_days;
     $('opd-cycle-days').textContent = cyc;
+    $('opd-cycle-days-2').textContent = cyc;
     var sel = list.filter(function (d) { return S.opdSel[d.drug_id]; }).length;
     var rows = list.filter(function (d) { return !q || (d.name + ' ' + d.strength).toLowerCase().indexOf(q) >= 0; }).map(function (d) {
-      var c = recentCount(d), sug = opdSuggest(d);
+      var sug = opdSuggest(d);
       return '<tr><td><input type="checkbox" data-opd="' + esc(d.drug_id) + '"' + (S.opdSel[d.drug_id] ? ' checked' : '') + ' aria-label="เลือก ' + esc(d.name) + '"></td>' +
         '<td>' + esc(d.name) + ' <span class="muted small">' + esc(d.strength) + '</span>' +
         (d.stocked ? ' <span class="badge">เบิกคลัง</span>' : '') + (lowNow(d) ? ' <span class="badge danger">ต่ำกว่าขั้นต่ำ</span>' : '') + '</td><td>' + esc(d.unit) + '</td>' +
-        '<td class="num">' + (c ? fmt(c.qty) + ' <span class="muted small">' + thDate(c.date) + '</span>' : '<span class="muted">–</span>') + '</td>' +
+        '<td class="num opd-count">' + opdCountCell(d) + '</td>' +
         '<td class="num">' + fmt(d.mean_daily * cyc / (d.factor || 1), 1) + '</td>' +
         '<td style="width:90px"><input type="number" min="0" step="1" data-opdq="' + esc(d.drug_id) + '" value="' +
         esc(S.opdQty[d.drug_id] === undefined ? '' : S.opdQty[d.drug_id]) + '" placeholder="' + esc(sug === null ? '' : sug) + '" aria-label="จะขอ"></td></tr>';
     }).join('');
-    $('opd-list').innerHTML = '<p class="small">เลือกแล้ว <b>' + sel + '</b> รายการ</p><div class="table-wrap"><table class="plain"><thead><tr><th></th><th>ยา</th><th>หน่วย</th>' +
+    var nOpd = list.filter(function (d) { return d.source === 'OPD'; });
+    var countedToday = nOpd.filter(function (d) { return String(opdCountValue(d)).trim() !== ''; }).length;
+    $('opd-list').innerHTML = '<div class="row small"><span>เลือกแล้ว <b>' + sel + '</b> รายการ</span>' +
+      '<span>· นับวันนี้ <b id="opd-counted">' + countedToday + '</b> / ' + nOpd.length + ' รายการ</span><span class="spacer"></span>' +
+      '<span id="opd-save-state" class="save-state muted"></span></div>' +
+      '<div class="table-wrap"><table class="plain"><thead><tr><th></th><th>ยา</th><th>หน่วย</th>' +
       '<th class="num">คงเหลือ (นับ)</th><th class="num">ใช้เฉลี่ย/' + esc(cyc) + ' วัน</th><th class="num">จะขอ</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    each('[data-opdc]', $('opd-list'), function (inp) { inp.oninput = onOpdCount; });
+    renderOpdSaveState();
     each('[data-opd]', $('opd-list'), function (cb) {
       cb.onchange = function () {
         var id = this.getAttribute('data-opd');
@@ -1619,7 +1695,13 @@
     if (!lines.length) { toast('ยังไม่ได้เลือกรายการ หรือยังไม่ได้ใส่จำนวน', true); return; }
     var btn = $('btn-save-opd'), kind = $('opd-kind').value;
     btn.disabled = true;
-    api('apiCreateOpdRequest', kind, lines.map(function (x) { return { drug_id: x.d.drug_id, qty: x.qty }; }), '').then(function (req) {
+    // Counts typed just before go in first, so the request's log carries them.
+    flushOpdCounts().then(function () {
+      return Object.keys(S.opdCnt).length ? flushOpdCounts() : null; // typed while a save was running
+    }).then(function () {
+      if (Object.keys(S.opdCnt).length) throw new Error('ยอดนับยังบันทึกไม่ครบ ลองกดอีกครั้ง');
+      return api('apiCreateOpdRequest', kind, lines.map(function (x) { return { drug_id: x.d.drug_id, qty: x.qty }; }), '');
+    }).then(function (req) {
       replaceOpd(req);
       S.opdSel = {}; S.opdQty = {}; store('opdSel', {}); store('opdQty', {});
       btn.disabled = false;
@@ -2198,7 +2280,7 @@
 
     // requests
     each('#view-request > .seg [data-mode]', null, function (b) {
-      b.onclick = function () { flushSave(); S.reqMode = b.getAttribute('data-mode'); store('reqMode', S.reqMode); renderRequest(); };
+      b.onclick = function () { flushSave(); flushOpdCounts(); S.reqMode = b.getAttribute('data-mode'); store('reqMode', S.reqMode); renderRequest(); };
     });
     each('#req-main .seg [data-sub]', null, function (b) {
       b.onclick = function () { flushSave(); S.reqSub = b.getAttribute('data-sub'); renderRequest(); };
@@ -2256,7 +2338,8 @@
 
     window.addEventListener('beforeunload', function (e) {
       var typed = Object.keys(S.recvQty).length || Object.keys(S.recvExp).length;
-      if (Object.keys(S.pending).length) { flushSave(); e.preventDefault(); e.returnValue = ''; }
+      if (Object.keys(S.opdCnt).length) flushOpdCounts();
+      if (Object.keys(S.pending).length || Object.keys(S.opdCnt).length) { flushSave(); e.preventDefault(); e.returnValue = ''; }
       else if (typed) { e.preventDefault(); e.returnValue = ''; }
     });
   }
